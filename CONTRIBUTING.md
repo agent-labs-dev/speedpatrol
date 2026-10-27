@@ -2,7 +2,7 @@
 
 ```bash
 pnpm install
-npx playwright@1.48.2 install chromium   # the probe and agent tests use a real browser
+PLAYWRIGHT_SKIP_BROWSER_GC=1 npx playwright@1.64.1 install chromium   # the probe and agent tests use a real browser
 pnpm build
 pnpm test
 pnpm check

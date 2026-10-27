@@ -104,7 +104,7 @@ The [skill](skills/speedpatrol/SKILL.md) tells the agent how to configure Speedp
 You need Node 22 or later and `git`. For `web` and `electron` benchmarks, install Chromium for Playwright once:
 
 ```bash
-npx -y playwright@1.48.2 install chromium
+PLAYWRIGHT_SKIP_BROWSER_GC=1 npx -y playwright@1.64.1 install chromium
 ```
 
 1. Create the config:
