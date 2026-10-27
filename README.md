@@ -40,7 +40,7 @@ flowchart TB
 - Every 30 minutes the patrol fetches `origin/main`. It measures only a commit it has not measured; on the same commit it still finishes open work (analysis, experiments, publishing).
 - The patrol measures `main` in a detached worktree under `.speedpatrol/runs/checkouts/`, so it never touches the checkout you work in.
 - When there are no benchmarks yet, the first cycle runs the scout.
-- `npx speedpatrol --once` runs one cycle; `--force` measures the same commit again.
+- `npx speedpatrol --once` runs one cycle; `--force` measures the same commit again; `--no-optimize` skips the optimizer for that run, so `speedpatrol optimize` can run as its own step.
 
 ## Two ways to compare
 
