@@ -105,6 +105,21 @@ Each step can `goto`, `click`, `fill`, `press`, then waits for `waitFor` (visibl
   steps: [{ name: settings, click: "#settings", waitFor: ".settings" }]
 ```
 
+Without `run`, the benchmark **attaches** to an app that is already running (started by you or an e2e harness) and never launches or stops it: each iteration runs the `steps` (screen navigation), and with `reload: true` first reloads the window and times it to `readySelector`. The steps must end where they started.
+
+```yaml
+- id: desktop.navigate
+  kind: electron
+  cdpPort: ${CDP_PORT}          # e.g. captured from app.setup output
+  page: /chat                   # the window whose URL contains this
+  readySelector: '[data-testid=room-rail]'
+  steps:
+    - { name: inbox, click: '[data-testid=rail-inbox]', waitFor: '[data-testid=inbox-view]' }
+    - { name: home, click: 'nav button:has-text("Home")', waitFor: '[data-testid=home]' }
+```
+
+A step's clock starts after its target is found and visible, and the click skips Playwright's actionability wait: in a hidden or occluded window (an e2e quiet window, Xvfb) that wait added 1-2 s to a 40 ms screen switch. [examples/nebula-desktop](../examples/nebula-desktop) is a full config.
+
 ### `startup`
 
 ```yaml
@@ -143,7 +158,7 @@ Each step can `goto`, `click`, `fill`, `press`, then waits for `waitFor` (visibl
     fps: { unit: count, better: higher }
 ```
 
-The command prints `{"metrics": {"render_ms": 12.3, "fps": 58}}` as a line of its output; the last such line counts.
+The command prints `{"metrics": {"render_ms": 12.3, "fps": 58}}` (or the list form `{"metrics": [{"name": "render_ms", "value": 12.3}]}`) as a line of its output; the last such line counts.
 
 ## Agents
 

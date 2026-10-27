@@ -99,7 +99,40 @@ function delta(value, verdictValue) {
 }
 
 /** Agent prose: escaped, with `code` spans kept. */
-const prose = (text) => esc(text).replace(/`([^`]+)`/g, '<code>$1</code>');
+const inline = (text) =>
+  esc(text)
+    .replace(/`([^`]+)`/g, '<code>$1</code>')
+    .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+
+/**
+ * The analyst writes Markdown. A small, escaped subset is enough for it:
+ * headings, fenced code, bullet lists, paragraphs, inline code and bold.
+ */
+const markdown = (text) => {
+  const out = [];
+  let inFence = false;
+  for (const part of String(text).split('\n')) {
+    if (part.trim().startsWith('```')) {
+      out.push(inFence ? '</code></pre>' : '<pre><code>');
+      inFence = !inFence;
+      continue;
+    }
+    if (inFence) {
+      out.push(`${esc(part)}\n`);
+      continue;
+    }
+    const heading = part.match(/^#{1,6}\s+(.*)$/);
+    const bullet = part.match(/^\s*[-*]\s+(.*)$/);
+    if (heading) out.push(`<h4>${inline(heading[1])}</h4>`);
+    else if (bullet) out.push(`<li>${inline(bullet[1])}</li>`);
+    else if (part.trim()) out.push(`<p>${inline(part)}</p>`);
+  }
+  if (inFence) out.push('</code></pre>');
+  return out
+    .join('')
+    .replace(/(<li>[\s\S]*?<\/li>)(?!<li>)/g, '$1</ul>')
+    .replace(/(?<!<\/li>)<li>/g, '<ul><li>');
+};
 
 const empty = (html) => `<div class="empty">${html}</div>`;
 const panel = (title, sub, body, right = '') =>
@@ -424,7 +457,7 @@ function renderBenchmark(benchmark, id, overview) {
               `<div class="panel-body"><span class="status ${esc(item.status)}">${esc(item.status)}</span> ${esc(item.title)} ${link(
                 item.issueUrl,
                 issueLabel(item.issueUrl),
-              )}</div>${item.analysis ? `<p class="analysis">${prose(item.analysis)}</p>` : ''}`,
+              )}</div>${item.analysis ? `<div class="analysis">${markdown(item.analysis)}</div>` : ''}`,
           )
           .join(''),
       )
@@ -593,7 +626,10 @@ function drawLine(el, spec) {
       const index = points.findIndex((p) => p.sha === marker.sha);
       if (index < 0) return '';
       return `<line x1="${x(index)}" x2="${x(index)}" y1="${m.top}" y2="${m.top + plotH}" stroke="var(--critical)" stroke-width="1" opacity="0.7"/>${
-        compact ? '' : `<text class="marker-label" x="${x(index) + 6}" y="${m.top + 10}">${esc(marker.label)}</text>`
+        compact
+          ? ''
+          : // Near the right edge, the label goes to the left of the line so it is not cut.
+            `<text class="marker-label" x="${x(index) > m.left + plotW * 0.75 ? x(index) - 6 : x(index) + 6}" y="${m.top + 10}" text-anchor="${x(index) > m.left + plotW * 0.75 ? 'end' : 'start'}">${esc(marker.label)}</text>`
       }`;
     })
     .join('');

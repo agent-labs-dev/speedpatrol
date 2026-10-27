@@ -37,8 +37,27 @@ export type MeasureOptions = {
   onResult?: (result: BenchmarkResult) => void | Promise<void>;
 };
 
+/**
+ * What a benchmark measures, without the settings that only change how long
+ * or how often (iterations, warmup, timeout) or how it is labelled: tuning
+ * those keeps two runs comparable.
+ */
 export function benchmarksHash(benchmarks: Benchmark[]): string {
-  return hash(benchmarks);
+  return hash(
+    benchmarks.map(
+      ({
+        title: _t,
+        description: _d,
+        tags: _g,
+        critical: _c,
+        iterations: _i,
+        warmup: _w,
+        timeoutMs: _o,
+        profile: _p,
+        ...what
+      }) => what,
+    ),
+  );
 }
 
 export function selectBenchmarks(benchmarks: Benchmark[], only?: string[]): Benchmark[] {
@@ -160,7 +179,20 @@ async function measureOne(benchmark: Benchmark, options: OneOptions): Promise<Be
   log(`${benchmark.id}: ${options.warmup} warmup + ${options.iterations} iterations`);
   try {
     await probe.open?.();
-    for (let i = 0; i < options.warmup; i++) await probe.sample().catch(() => undefined);
+    // A warmup that fails every time means the benchmark is broken, not slow:
+    // stop here with the error instead of timing out iteration after iteration.
+    let warmupError: string | undefined;
+    let warmed = options.warmup === 0;
+    for (let i = 0; i < options.warmup; i++) {
+      try {
+        await probe.sample();
+        warmed = true;
+      } catch (error) {
+        warmupError = (error as Error).message;
+        log(`${benchmark.id}: warmup ${i + 1} failed: ${redact(warmupError, app.secretValues).split('\n')[0]}`);
+      }
+    }
+    if (!warmed) throw new Error(`Every warmup failed: ${warmupError}`);
     let failures = 0;
     for (let i = 0; i < options.iterations; i++) {
       try {
@@ -168,6 +200,7 @@ async function measureOne(benchmark: Benchmark, options: OneOptions): Promise<Be
       } catch (error) {
         failures++;
         samples.push({ iteration: i, metrics: {}, error: redact((error as Error).message, app.secretValues) });
+        log(`${benchmark.id}: iteration ${i + 1} failed: ${samples.at(-1)!.error!.split('\n')[0]}`);
         // Three failures in a row and no success: the benchmark is broken, not slow.
         if (failures >= 3 && samples.every((sample) => sample.error)) break;
       }

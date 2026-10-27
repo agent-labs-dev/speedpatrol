@@ -3,17 +3,31 @@ import { runTimed } from '../exec.js';
 import { profileCommand, resolveCwd, resolveEnv } from './command.js';
 import type { ProbeFactory } from './types.js';
 
-/** The last stdout line that is `{"metrics": {...}}`. */
+/** The last stdout line that is `{"metrics": {...}}` or `{"metrics": [{name, value}]}`. */
 export function parseMetricsLine(stdout: string): Record<string, number> | undefined {
   const lines = stdout.trim().split('\n').reverse();
   for (const line of lines) {
     const trimmed = line.trim();
     if (!trimmed.startsWith('{')) continue;
     try {
-      const parsed = JSON.parse(trimmed) as { metrics?: Record<string, unknown> };
+      const parsed = JSON.parse(trimmed) as { metrics?: unknown };
       if (!parsed.metrics || typeof parsed.metrics !== 'object') continue;
+      // Also the list form, [{"name": "boot_ms", "value": 812}], that perf
+      // harnesses such as nebula-desktop's `e2e --json perf` print.
+      if (Array.isArray(parsed.metrics)) {
+        return Object.fromEntries(
+          parsed.metrics
+            .filter(
+              (item): item is { name: string; value: number } =>
+                typeof item?.name === 'string' && typeof item?.value === 'number',
+            )
+            .map((item) => [item.name, item.value]),
+        );
+      }
       return Object.fromEntries(
-        Object.entries(parsed.metrics).filter((entry): entry is [string, number] => typeof entry[1] === 'number'),
+        Object.entries(parsed.metrics as Record<string, unknown>).filter(
+          (entry): entry is [string, number] => typeof entry[1] === 'number',
+        ),
       );
     } catch {
       /* not a metrics line */

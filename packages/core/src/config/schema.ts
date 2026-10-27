@@ -129,15 +129,26 @@ const webSchema = z.object({
   warm: z.boolean().default(false),
 });
 
+/**
+ * An Electron app. With `run`, each iteration launches the app (app open).
+ * Without it, Speedpatrol attaches to an app that is already running on
+ * `cdpPort` and times the steps in it (screen navigation), and with
+ * `reload` also the window's reload until `readySelector` (renderer boot).
+ */
 const electronSchema = z.object({
   ...common,
   kind: z.literal('electron'),
-  /** Launches the app. Must open CDP on `cdpPort`. */
-  run: z.string(),
+  /** Launches the app. Must open CDP on `cdpPort`. Leave it out to attach. */
+  run: z.string().optional(),
   cwd: z.string().optional(),
   env: z.record(z.string()).default({}),
-  cdpPort: z.number().int().positive(),
-  /** The first window is ready when this selector is visible. */
+  /** A number, or `${NAME}` from env or a setup capture. */
+  cdpPort: z.union([z.number().int().positive(), z.string()]),
+  /** Attach: the window whose URL contains this. Default: the first page. */
+  page: z.string().optional(),
+  /** Attach: reload the window each iteration and time it to `readySelector`. */
+  reload: z.boolean().default(false),
+  /** The window is ready when this selector is visible. */
   readySelector: z.string().optional(),
   steps: z.array(flowStepSchema).default([]),
 });

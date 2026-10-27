@@ -18,6 +18,12 @@ describe('parseMetricsLine', () => {
     expect(parseMetricsLine(stdout)).toEqual({ a: 2 });
     expect(parseMetricsLine('no json here')).toBeUndefined();
   });
+
+  it('reads the list form that nebula-desktop `e2e --json perf boot` prints', () => {
+    const stdout =
+      '{"eval":"boot","metrics":[{"name":"chat.content_ms","value":2927.1,"unit":"ms","better":"lower"},{"name":"chat.heap_mb","value":38.14},{"name":"bad"}]}';
+    expect(parseMetricsLine(stdout)).toEqual({ 'chat.content_ms': 2927.1, 'chat.heap_mb': 38.14 });
+  });
 });
 
 describe('hotspots', () => {

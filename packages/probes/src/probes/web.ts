@@ -1,10 +1,10 @@
 import { writeFile } from 'node:fs/promises';
-import { type FlowStep, interpolate, type MetricSpec, type ProfileArtifact } from '@speedpatrol/core';
+import { type Benchmark, type FlowStep, interpolate, type MetricSpec, type ProfileArtifact } from '@speedpatrol/core';
 import { type Browser, type BrowserContext, type CDPSession, chromium, type Page } from 'playwright';
 import { type Background, startBackground, waitUntil } from '../exec.js';
 import { type CpuProfile, hotspots } from '../profile.js';
 import { resolveCwd, resolveEnv } from './command.js';
-import type { ProbeContext, ProbeFactory } from './types.js';
+import type { Probe, ProbeContext, ProbeFactory } from './types.js';
 
 /** Collects what navigation timing does not have: LCP, layout shifts and long tasks. */
 const OBSERVERS = `(() => {
@@ -78,14 +78,27 @@ function stepMetrics(steps: FlowStep[]): Record<string, MetricSpec> {
   };
 }
 
-/** One flow step, timed from the action until its wait condition holds. */
+/**
+ * One flow step, timed from the action until its wait condition holds.
+ *
+ * The target is found and checked visible before the clock starts, and the
+ * click and fill skip Playwright's actionability wait (`force`). That wait
+ * checks the element is stable over animation frames, and a hidden or
+ * occluded window (an e2e harness's quiet window, Xvfb) gets few frames: in
+ * nebula-desktop it added 1-2 s to a 40 ms screen switch, so the step timed
+ * the tool instead of the app.
+ */
 async function runStep(page: Page, step: FlowStep, context: ProbeContext): Promise<number> {
-  const started = performance.now();
   const timeout = context.timeoutMs;
+  const clickTarget = step.click ? page.locator(step.click).first() : undefined;
+  const fillTarget = step.fill ? page.locator(step.fill.selector).first() : undefined;
+  await clickTarget?.waitFor({ state: 'visible', timeout });
+  await fillTarget?.waitFor({ state: 'visible', timeout });
+  const started = performance.now();
   if (step.goto) await page.goto(interpolate(step.goto, context.vars), { waitUntil: 'load', timeout });
-  if (step.click) await page.locator(step.click).first().click({ timeout });
-  if (step.fill)
-    await page.locator(step.fill.selector).first().fill(interpolate(step.fill.value, context.vars), { timeout });
+  if (clickTarget) await clickTarget.click({ force: true, timeout });
+  if (fillTarget && step.fill)
+    await fillTarget.fill(interpolate(step.fill.value, context.vars), { force: true, timeout });
   if (step.press) await page.keyboard.press(step.press);
   if (step.waitFor) await page.locator(step.waitFor).first().waitFor({ state: 'visible', timeout });
   if (step.waitForNetworkIdle) await page.waitForLoadState('networkidle', { timeout });
@@ -197,9 +210,13 @@ async function hasPageTarget(port: number): Promise<boolean> {
 /**
  * Electron app open: from the launch to the first window (`window_ms`) and
  * to the first screen being ready (`ready_ms`), then the flow steps. The app
- * must open CDP on `cdpPort`, e.g. with `--remote-debugging-port`.
+ * must open CDP on `cdpPort`, e.g. with `--remote-debugging-port`. Without
+ * `run`, the probe attaches to the running app instead (see `attachProbe`).
  */
 export const electronProbe: ProbeFactory<'electron'> = (benchmark, context) => {
+  const port = Number(interpolate(String(benchmark.cdpPort), context.vars));
+  if (!Number.isInteger(port) || port <= 0) throw new Error(`cdpPort is not a port: ${benchmark.cdpPort}`);
+  if (!benchmark.run) return attachProbe(benchmark, port, context);
   const cwd = resolveCwd(benchmark.cwd, context);
   const env = resolveEnv(benchmark.env, context);
   const command = interpolate(benchmark.run, context.vars);
@@ -212,33 +229,25 @@ export const electronProbe: ProbeFactory<'electron'> = (benchmark, context) => {
       await waitUntil(
         async () => {
           if (app.child.exitCode !== null) throw new Error(`The app exited with code ${app.child.exitCode}`);
-          return hasPageTarget(benchmark.cdpPort);
+          return hasPageTarget(port);
         },
         context.timeoutMs,
         'the first Electron window',
         10,
       );
       const windowMs = performance.now() - started;
-      browser = await chromium.connectOverCDP(`http://127.0.0.1:${benchmark.cdpPort}`);
-      let page: Page | undefined;
-      await waitUntil(
-        () => {
-          page = browser!.contexts().flatMap((item) => item.pages())[0];
-          return page !== undefined;
-        },
-        context.timeoutMs,
-        'the first page',
-      );
-      const cdp = await page!.context().newCDPSession(page!);
+      browser = await chromium.connectOverCDP(`http://127.0.0.1:${port}`);
+      const page = await findPage(browser, undefined, context.timeoutMs);
+      const cdp = await page.context().newCDPSession(page);
       if (file) await startProfiler(cdp);
       if (benchmark.readySelector) {
-        await page!.locator(benchmark.readySelector).first().waitFor({ state: 'visible', timeout: context.timeoutMs });
+        await page.locator(benchmark.readySelector).first().waitFor({ state: 'visible', timeout: context.timeoutMs });
       } else {
-        await page!.waitForLoadState('load', { timeout: context.timeoutMs });
+        await page.waitForLoadState('load', { timeout: context.timeoutMs });
       }
       const readyMs = performance.now() - started;
-      const metrics = clean((await page!.evaluate(READ_METRICS)) as Record<string, unknown>);
-      const steps = await runSteps(page!, benchmark.steps, context);
+      const metrics = clean((await page.evaluate(READ_METRICS)) as Record<string, unknown>);
+      const steps = await runSteps(page, benchmark.steps, context);
       const artifact = file ? await stopProfiler(cdp, file) : undefined;
       return { metrics: { window_ms: windowMs, ready_ms: readyMs, ...metrics, ...steps }, artifact };
     } finally {
@@ -264,3 +273,83 @@ export const electronProbe: ProbeFactory<'electron'> = (benchmark, context) => {
     },
   };
 };
+
+async function findPage(browser: Browser, match: string | undefined, timeoutMs: number): Promise<Page> {
+  let page: Page | undefined;
+  await waitUntil(
+    () => {
+      page = browser
+        .contexts()
+        .flatMap((item) => item.pages())
+        .find((candidate) => !match || candidate.url().includes(match));
+      return page !== undefined;
+    },
+    timeoutMs,
+    match ? `a window whose URL contains "${match}"` : 'the first page',
+  );
+  return page!;
+}
+
+/**
+ * Screen navigation in an Electron app that is already running: the app is
+ * never launched or stopped, so the person (or an e2e harness) keeps it.
+ * The steps must end where they started, so every iteration measures the
+ * same moves. With `reload`, each iteration first reloads the window and
+ * times it to `readySelector`: the renderer's boot, without the process start.
+ */
+function attachProbe(benchmark: Extract<Benchmark, { kind: 'electron' }>, port: number, context: ProbeContext): Probe {
+  let browser: Browser | undefined;
+  let page: Page | undefined;
+  const iteration = async (file?: string) => {
+    const cdp = await page!.context().newCDPSession(page!);
+    try {
+      if (file) await startProfiler(cdp);
+      const metrics: Record<string, number> = {};
+      if (benchmark.reload) {
+        const started = performance.now();
+        await page!.reload({ waitUntil: 'load', timeout: context.timeoutMs });
+        if (benchmark.readySelector) {
+          await page!
+            .locator(benchmark.readySelector)
+            .first()
+            .waitFor({ state: 'visible', timeout: context.timeoutMs });
+        }
+        metrics.ready_ms = performance.now() - started;
+        Object.assign(metrics, clean((await page!.evaluate(READ_METRICS)) as Record<string, unknown>));
+      }
+      Object.assign(metrics, await runSteps(page!, benchmark.steps, context));
+      const artifact = file ? await stopProfiler(cdp, file) : undefined;
+      return { metrics, artifact };
+    } finally {
+      await cdp.detach().catch(() => undefined);
+    }
+  };
+  return {
+    primary: benchmark.steps.length ? 'flow_ms' : 'ready_ms',
+    metrics: {
+      ...(benchmark.reload ? { ready_ms: { unit: 'ms', better: 'lower' } as MetricSpec, ...PAGE_METRICS } : {}),
+      ...stepMetrics(benchmark.steps),
+    },
+    async open() {
+      if (!benchmark.reload && benchmark.steps.length === 0) {
+        throw new Error('An attached electron benchmark needs steps, or reload: true');
+      }
+      browser = await chromium.connectOverCDP(`http://127.0.0.1:${port}`);
+      page = await findPage(browser, benchmark.page, context.timeoutMs);
+      if (benchmark.readySelector) {
+        await page.locator(benchmark.readySelector).first().waitFor({ state: 'visible', timeout: context.timeoutMs });
+      }
+    },
+    async sample() {
+      return (await iteration()).metrics;
+    },
+    async profile(file) {
+      if (benchmark.profile.mode === 'off') return undefined;
+      return (await iteration(file)).artifact;
+    },
+    async close() {
+      // Over CDP, close() only disconnects: the app keeps running.
+      await browser?.close().catch(() => undefined);
+    },
+  };
+}
