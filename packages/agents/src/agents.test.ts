@@ -142,7 +142,7 @@ describe('agents over MCP', () => {
       { tool: 'finish', input: { summary: 'Added a comment.' } },
     ]);
     const placebo = await runOptimizer({ loaded, store, benchmark, baseSha: head, log: say });
-    expect(placebo.experiment.status).toBe('rejected');
+    expect(placebo.experiment.status, placebo.experiment.reason).toBe('rejected');
 
     script([
       { tool: 'get_target' },
@@ -151,7 +151,7 @@ describe('agents over MCP', () => {
       { tool: 'finish', input: { summary: 'Restored ROUNDS to 20000.' } },
     ]);
     const real = await runOptimizer({ loaded, store, benchmark, baseSha: head, log: say });
-    expect(real.experiment.status).toBe('improved');
+    expect(real.experiment.status, real.experiment.reason).toBe('improved');
     expect(real.experiment.deltaPct).toBeLessThan(-0.05);
     expect(gitIn(real.experiment.worktree, 'log', '-1', '--format=%s')).toContain('perf(api.items)');
   });

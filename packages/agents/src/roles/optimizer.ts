@@ -153,7 +153,13 @@ export async function runOptimizer(options: {
       return { experiment };
     }
     await git(worktree, ['add', '-A']);
+    // The repo's own identity when it has one; a machine with none (a fresh
+    // CI runner or VM) still gets its experiment committed.
+    const identity = (await tryGit(worktree, ['config', 'user.email']))
+      ? []
+      : ['-c', 'user.name=Speedpatrol', '-c', 'user.email=speedpatrol@users.noreply.github.com'];
     await git(worktree, [
+      ...identity,
       '-c',
       'commit.gpgsign=false',
       'commit',
