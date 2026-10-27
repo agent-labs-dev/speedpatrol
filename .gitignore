@@ -1,0 +1,22 @@
+node_modules/
+dist/
+*.tsbuildinfo
+coverage/
+.DS_Store
+*.log
+
+# Speedpatrol local data: runs, baselines, profiles, agent sessions. Timings
+# belong to the machine that measured them, so they are never committed. The
+# config, the app guide and the benchmarks are committed.
+**/.speedpatrol/runs/
+
+.env
+.env.*
+!.env.example
+
+# Copied from packages/dashboard/src/ui by the speedpatrol bundle build.
+packages/speedpatrol/src/ui/
+
+# Copied from the repo root by the speedpatrol bundle build.
+packages/speedpatrol/LICENSE
+packages/speedpatrol/NOTICE

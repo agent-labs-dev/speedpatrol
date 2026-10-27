@@ -1,0 +1,79 @@
+version: 1
+project:
+  name: nebula-desktop
+  source: .
+app:
+  prepare:
+    - run: ${DESKTOP_PRIMARY}/.speedpatrol/prepare.sh
+      timeoutMs: 900000
+  setup:
+    - run: ${DESKTOP_PRIMARY}/.speedpatrol/launch-app.sh
+      timeoutMs: 600000
+      capture:
+        CDP_PORT: 'CDP :(\d+)'
+  env:
+    API: https://api.nebula-dev.ai
+    DESKTOP_PRIMARY: ${NEBULA_DESKTOP_DIR}  # the primary checkout, set in the shell
+  secrets: [SP_TOKEN]
+defaults:
+  iterations: 12
+  warmup: 2
+  timeoutMs: 120000
+thresholds:
+  relative: 0.10
+  absolute: 5
+benchmarks:
+  - id: desktop.navigate
+    title: Home -> Inbox -> Channel -> Home in the running app
+    kind: electron
+    critical: true
+    cdpPort: ${CDP_PORT}
+    page: /chat
+    timeoutMs: 30000
+    warmup: 3
+    readySelector: '[data-testid=room-rail]'
+    steps:
+      - name: inbox
+        click: '[data-testid=rail-inbox]'
+        waitFor: '[data-testid=inbox-view]'
+      - name: channel
+        click: '[data-testid=room-rail] button:has-text("perf-room")'
+        waitFor: '[data-testid=space-tabs]:has-text("perf-room")'
+      - name: home
+        click: '[data-testid=room-rail] button:has-text("Home") >> nth=0'
+        waitFor: '[data-testid=space-tabs]:has-text("Home")'
+  - id: desktop.boot
+    title: Renderer boot of the app window and the capsule (e2e perf boot)
+    kind: custom
+    critical: true
+    iterations: 6
+    warmup: 1
+    run: bun run e2e --json perf boot --runs 1 2>/dev/null
+    env:
+      PATH: ${HOME}/.bun/bin:${PATH}
+    metrics:
+      chat.content_ms: { unit: ms, better: lower }
+      chat.mount_ms: { unit: ms, better: lower }
+      chat.heap_mb: { unit: mb, better: lower }
+      capsule.content_ms: { unit: ms, better: lower }
+  - id: api.channels
+    kind: http
+    request: { url: '${API}/channels', headers: { authorization: 'Bearer ${SP_TOKEN}' } }
+  - id: api.threads
+    kind: http
+    request: { url: '${API}/threads?limit=20', headers: { authorization: 'Bearer ${SP_TOKEN}' } }
+  - id: api.agents
+    kind: http
+    request: { url: '${API}/agents', headers: { authorization: 'Bearer ${SP_TOKEN}' } }
+  - id: build.room
+    title: Build of @nebula/room
+    kind: command
+    iterations: 6
+    run: bun run build
+    cwd: packages/room
+    env:
+      PATH: ${HOME}/.bun/bin:${PATH}
+agents:
+  scout: { use: claude }
+  analyst: { use: claude }
+  patrol: { pull: HEAD }

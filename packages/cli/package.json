@@ -1,0 +1,26 @@
+{
+  "name": "@speedpatrol/cli",
+  "version": "0.0.0",
+  "private": true,
+  "license": "Apache-2.0",
+  "type": "module",
+  "bin": {
+    "speedpatrol": "./dist/bin.js"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc --build"
+  },
+  "dependencies": {
+    "@speedpatrol/agents": "workspace:*",
+    "@speedpatrol/core": "workspace:*",
+    "@speedpatrol/dashboard": "workspace:*",
+    "@speedpatrol/probes": "workspace:*",
+    "@speedpatrol/stats": "workspace:*",
+    "playwright": "1.64.1"
+  }
+}
