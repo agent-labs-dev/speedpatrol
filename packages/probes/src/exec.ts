@@ -1,5 +1,8 @@
 import { type ChildProcess, spawn } from 'node:child_process';
-import { existsSync } from 'node:fs';
+import { randomBytes } from 'node:crypto';
+import { existsSync, readFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import type { Readable } from 'node:stream';
 
 export type Exec = {
@@ -22,7 +25,8 @@ export type ExecResult = {
   timedOut: boolean;
 };
 
-const GNU_TIME = '/usr/bin/time';
+// Overridable so a machine without GNU time can still exercise this path.
+const GNU_TIME = process.env.SPEEDPATROL_GNU_TIME ?? '/usr/bin/time';
 
 function parseTimes(text: string): { user: number; sys: number } | undefined {
   // bash `times`: the second line is the children's "user sys", e.g. "0m1.250s 0m0.031s".
@@ -58,7 +62,10 @@ function collect(stream: Readable | null, limit = 4 * 1024 * 1024): { text: () =
  */
 export function runTimed(exec: Exec): Promise<ExecResult> {
   const gnuTime = process.platform === 'linux' && existsSync(GNU_TIME);
-  const script = `${gnuTime ? `${GNU_TIME} -f '__SP_RSS %M' -o /dev/fd/3 ` : ''}bash -c ${shellQuote(exec.command)}; __sp=$?; times >&3; exit $__sp`;
+  // GNU time writes to a file: Node's stdio pipes are sockets, and Linux
+  // refuses to open() a socket through /dev/fd (ENXIO).
+  const rssFile = gnuTime ? join(tmpdir(), `speedpatrol-rss-${randomBytes(6).toString('hex')}`) : undefined;
+  const script = `${rssFile ? `${GNU_TIME} -f '__SP_RSS %M' -o ${shellQuote(rssFile)} ` : ''}bash -c ${shellQuote(exec.command)}; __sp=$?; times >&3; exit $__sp`;
   return new Promise((resolve) => {
     const started = performance.now();
     const child = spawn('bash', ['-c', script], {
@@ -79,8 +86,17 @@ export function runTimed(exec: Exec): Promise<ExecResult> {
       const wallMs = performance.now() - started;
       clearTimeout(timer);
       const metaText = meta.text();
-      const rss = metaText.match(/__SP_RSS (\d+)/);
-      const times = parseTimes(metaText.replace(/__SP_RSS \d+\n?/, ''));
+      let rssText = '';
+      if (rssFile) {
+        try {
+          rssText = readFileSync(rssFile, 'utf8');
+        } catch {
+          /* killed before time wrote it */
+        }
+        rmSync(rssFile, { force: true });
+      }
+      const rss = rssText.match(/__SP_RSS (\d+)/);
+      const times = parseTimes(metaText);
       resolve({
         code,
         stdout: stdout.text(),
