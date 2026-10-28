@@ -83,7 +83,8 @@ export async function publish(
   }
   for (const experiment of await store.listExperiments()) {
     if (experiment.status !== 'improved' || experiment.prUrl) continue;
-    const title = `perf(${experiment.target.benchmark}): ${formatPct(experiment.deltaPct ?? 0)} ${experiment.target.metric}`;
+    const scope = loaded.config.agents.optimizer.commitScope ?? experiment.target.benchmark;
+    const title = `perf(${scope}): ${formatPct(experiment.deltaPct ?? 0)} ${experiment.target.metric}`;
     const body = (await experimentBody(store, experiment)) + FOOTER;
     if (dryRun) {
       options.log(`[dry run] PR from ${experiment.branch}: ${title}\n${body}\n`);

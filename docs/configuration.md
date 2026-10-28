@@ -38,6 +38,7 @@ agents:
   scout: { use: claude, maxSteps: 60, timeoutMinutes: 30 }
   analyst: { use: claude }
   optimizer: { use: claude, enabled: false, maxPerCycle: 1, minImprovement: 0.05 }
+  # optimizer.commitScope: app   # commit/PR scope when the repo allows only its own (default: benchmark id)
   github: { enabled: false, pullRequests: draft, labels: [speedpatrol] }
   patrol: { intervalMinutes: 30, pull: origin/main, cycles: 0 }
 ```

@@ -82,7 +82,19 @@ export function runTimed(exec: Exec): Promise<ExecResult> {
       timedOut = true;
       killTree(child, 'SIGKILL');
     }, exec.timeoutMs);
+    // A failed spawn (e.g. a cwd an experiment's cleanup already removed)
+    // is a failed sample, not an unhandled 'error' that kills the patrol.
+    let settled = false;
+    child.on('error', (error) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      if (rssFile) rmSync(rssFile, { force: true });
+      resolve({ code: null, stdout: '', stderr: error.message, wallMs: performance.now() - started, timedOut });
+    });
     child.on('close', (code) => {
+      if (settled) return;
+      settled = true;
       const wallMs = performance.now() - started;
       clearTimeout(timer);
       const metaText = meta.text();
@@ -136,6 +148,7 @@ export function startBackground(command: string, cwd: string, env: Record<string
   };
   child.stdout?.on('data', append);
   child.stderr?.on('data', append);
+  child.on('error', (error) => append(Buffer.from(`${error.message}\n`)));
   return {
     child,
     output: () => output,
