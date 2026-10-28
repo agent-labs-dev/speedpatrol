@@ -39,12 +39,13 @@ export async function serveTools(
   options: Options = {},
 ): Promise<{ url: string; close(): Promise<void> }> {
   const budget = { calls: 0, max: options.maxCalls ?? Number.POSITIVE_INFINITY };
+  const running = new Map<string, Promise<ToolResult>>();
   const http = createServer((request, response) => {
     if (request.url !== '/mcp') {
       response.writeHead(404).end();
       return;
     }
-    void handle(request, response, tools, options, budget).catch((error) => {
+    void handle(request, response, tools, options, budget, running).catch((error) => {
       if (!response.headersSent) response.writeHead(500).end(String(error));
     });
   });
@@ -72,6 +73,7 @@ async function handle(
   tools: Tool[],
   options: Options,
   budget: { calls: number; max: number },
+  running: Map<string, Promise<ToolResult>>,
 ): Promise<void> {
   const server = new Server({ name: 'speedpatrol', version: '0.0.0' }, { capabilities: { tools: {} } });
   server.setRequestHandler(ListToolsRequestSchema, async () => ({
@@ -84,7 +86,18 @@ async function handle(
   server.setRequestHandler(CallToolRequestSchema, async (call) => {
     const input = call.params.arguments ?? {};
     const started = Date.now();
-    const result = await callTool(tools, call.params.name, input, budget);
+    // A client that gave up on a slow call and calls again joins the first run:
+    // the server never cancels a tool, so a second one would race it for the
+    // same worktree and ports.
+    const key = `${call.params.name}\0${JSON.stringify(input)}`;
+    const joined = running.get(key);
+    if (joined) {
+      const result = await joined;
+      return { content: [{ type: 'text' as const, text: result.text }], isError: result.isError ?? false };
+    }
+    const pending = callTool(tools, call.params.name, input, budget);
+    running.set(key, pending);
+    const result = await pending.finally(() => running.delete(key));
     options.onCall?.(call.params.name, input, result, Date.now() - started);
     return { content: [{ type: 'text' as const, text: result.text }], isError: result.isError ?? false };
   });
