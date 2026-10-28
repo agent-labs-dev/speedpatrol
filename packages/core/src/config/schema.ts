@@ -289,6 +289,12 @@ export const agentsSchema = z
         maxPerCycle: z.number().int().nonnegative().default(1),
         /** An improvement smaller than this is not published. */
         minImprovement: z.number().min(0).default(0.05),
+        /**
+         * Conventional-commit scope of an experiment's commit and PR title
+         * (default: the benchmark id). Set it when the repo's commit hooks or
+         * PR-title lint allow only their own scopes.
+         */
+        commitScope: z.string().optional(),
       })
       .default({}),
     github: z

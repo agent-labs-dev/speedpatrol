@@ -165,7 +165,7 @@ export async function runOptimizer(options: {
       'commit',
       '-q',
       '-m',
-      `perf(${benchmark.id}): ${(hypothesis ?? experiment.summary ?? 'speed up').split('\n')[0]!.slice(0, 60)}`,
+      `perf(${loaded.config.agents.optimizer.commitScope ?? benchmark.id}): ${(hypothesis ?? experiment.summary ?? 'speed up').split('\n')[0]!.slice(0, 60)}`,
       '-m',
       `${experiment.summary ?? ''}\n\nProposed by the Speedpatrol optimizer.`,
     ]);
