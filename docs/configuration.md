@@ -40,6 +40,7 @@ agents:
   optimizer: { use: claude, enabled: false, maxPerCycle: 1, minImprovement: 0.05 }
   # optimizer.commitScope: app   # commit/PR scope when the repo allows only its own (default: benchmark id)
   github: { enabled: false, pullRequests: draft, labels: [speedpatrol] }
+  # github.labels are created on the repo before the first issue or PR; an existing label is left as is
   patrol: { intervalMinutes: 30, pull: origin/main, cycles: 0 }
 ```
 

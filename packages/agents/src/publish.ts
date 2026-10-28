@@ -10,6 +10,19 @@ async function gh(cwd: string, args: string[]): Promise<string> {
   return stdout.trim();
 }
 
+/**
+ * Creates each label on the target repo, so the first `--label` on a repo that
+ * has never seen Speedpatrol does not fail. An existing label is left as is.
+ */
+export async function ensureLabels(run: (args: string[]) => Promise<unknown>, labels: string[]): Promise<void> {
+  for (const label of labels)
+    try {
+      await run(['label', 'create', label, '--color', '5319e7', '--description', 'Filed by Speedpatrol']);
+    } catch (error) {
+      if (!/already exists/i.test((error as Error).message)) throw error;
+    }
+}
+
 const FOOTER =
   '\n\n---\n_Opened by [Speedpatrol](https://github.com/agent-labs-dev/speedpatrol). Close it to dismiss; Speedpatrol will not reopen the same regression._';
 
@@ -57,6 +70,11 @@ export async function publish(
   const result: PublishResult = { issues: [], pullRequests: [], errors: [], dryRun };
   const repoArgs = github.repo ? ['--repo', github.repo] : [];
   const labels = github.labels.flatMap((label) => ['--label', label]);
+  let labelsReady: Promise<void> | undefined;
+  const ensure = () => {
+    labelsReady ??= ensureLabels((args) => gh(loaded.source, [...args, ...repoArgs]), github.labels);
+    return labelsReady;
+  };
   for (const regression of await store.listRegressions()) {
     if (regression.status !== 'filed' || regression.issueUrl) continue;
     const body = (await regressionBody(store, regression)) + FOOTER;
@@ -65,6 +83,7 @@ export async function publish(
       continue;
     }
     try {
+      await ensure();
       const url = await gh(loaded.source, [
         'issue',
         'create',
@@ -91,6 +110,7 @@ export async function publish(
       continue;
     }
     try {
+      await ensure();
       await git(experiment.worktree, ['push', '-u', 'origin', experiment.branch]);
       const url = await gh(experiment.worktree, [
         'pr',
