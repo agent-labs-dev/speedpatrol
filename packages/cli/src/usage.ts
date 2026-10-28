@@ -4,7 +4,8 @@ Usage: speedpatrol [command] [options]
 
 Commands:
   (none), patrol         Measure origin/main on every new commit, confirm and explain
-                         regressions, try speed-ups, publish. --once, --force
+                         regressions, try speed-ups, publish. --once, --force,
+                         --no-optimize (measure and publish only)
   init                   Create .speedpatrol/ with a config for this repo. --agent claude|codex|opencode
   run [ids|tags...]      Measure this checkout, record it as the baseline of its commit
                          when it is clean, and compare with the previous baseline.

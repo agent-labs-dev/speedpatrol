@@ -171,7 +171,13 @@ async function main(argv: Argv): Promise<number> {
     default: {
       const { loaded, store } = await load(cwd);
       if (flags.once) {
-        const result = await cycle({ loaded, store, force: Boolean(flags.force), log });
+        const result = await cycle({
+          loaded,
+          store,
+          force: Boolean(flags.force),
+          optimize: flags.optimize !== false,
+          log,
+        });
         out(
           result.skipped
             ? `No new commit on ${loaded.config.agents.patrol.pull}.`
@@ -181,7 +187,14 @@ async function main(argv: Argv): Promise<number> {
       }
       const controller = new AbortController();
       process.once('SIGINT', () => controller.abort());
-      await patrol({ loaded, store, force: Boolean(flags.force), log, signal: controller.signal });
+      await patrol({
+        loaded,
+        store,
+        force: Boolean(flags.force),
+        optimize: flags.optimize !== false,
+        log,
+        signal: controller.signal,
+      });
       return EXIT.ok;
     }
   }

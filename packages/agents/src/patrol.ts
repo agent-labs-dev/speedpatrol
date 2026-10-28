@@ -23,6 +23,8 @@ export type CycleOptions = {
   loaded: LoadedConfig;
   store: Store;
   force?: boolean;
+  /** false skips the optimizer this cycle, so a caller can run `optimize` as its own step. */
+  optimize?: boolean;
   log: (line: string) => void;
 };
 
@@ -205,7 +207,7 @@ export async function cycle(options: CycleOptions): Promise<CycleResult> {
     // Without an analyst the regression is still filed, with the numbers alone.
     for (const regression of result.confirmed) await store.saveRegression({ ...regression, status: 'filed' });
   }
-  if (agents.optimizer.enabled && !result.skipped && result.run) {
+  if (agents.optimizer.enabled && options.optimize !== false && !result.skipped && result.run) {
     for (const benchmark of await pickTargets(options.loaded, store, agents.optimizer.maxPerCycle)) {
       const { experiment } = await runOptimizer({
         loaded: options.loaded,
