@@ -8,6 +8,23 @@
 | Optimizer | Speeds up one benchmark in a worktree (off by default) | its worktree | `claude` |
 | Publisher | Opens issues and PRs (code, no model) | | |
 
+The analyst can bisect with its own A/B runs, but it cannot clear a verdict: statistics decide each verdict (ADR 0001).
+
+## Runtimes
+
+Each role runs on a local agent CLI or on an API key. The tools are the contract, not the runtime. A CLI agent gets the tools of its role from a local MCP server. Speedpatrol's own loop calls the same tools in-process.
+
+```yaml
+agents:
+  scout: { use: claude }                                           # Claude Code
+  analyst: { use: codex }                                          # Codex
+  optimizer:
+    enabled: true
+    use: { runtime: model, via: openrouter, model: anthropic/claude-sonnet-5.5 }
+```
+
+`use: claude | codex | opencode` selects a preset command. `{ runtime: cli, command: "..." }` runs any command, and fills in `{prompt}`, `{mcp}`, `{mcpUrl}`, and `{workdir}`. [Configuration](configuration.md#agents) tells the model runtimes and their API keys.
+
 ## Tools
 
 The tools are the contract (ADR 0003). A CLI agent gets them over a local MCP server named `speedpatrol`; the model runtime calls them in-process.
