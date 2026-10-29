@@ -4,6 +4,24 @@
 
 `agent-labs-dev/speedpatrol@v0` runs `speedpatrol compare --base origin/<base branch>` on a pull request and posts the table as one comment, which it updates on each push.
 
+```yaml
+# .github/workflows/speedpatrol.yml
+name: Speedpatrol
+on: pull_request
+permissions:
+  contents: read
+  pull-requests: write
+jobs:
+  compare:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - uses: agent-labs-dev/speedpatrol@v0
+        with:
+          fail-on-regression: true
+```
+
 | Input | Default | |
 | --- | --- | --- |
 | `base` | the PR's base branch | the ref to compare against |
@@ -21,5 +39,7 @@ The checkout needs the base branch: use `fetch-depth: 0`. A `web` or `electron` 
 Exit codes: 0 no regression, 1 regression (with `fail-on-regression`), 2 config error, 4 could not measure (the app did not start).
 
 ## Noise on shared runners
+
+Hosted runners share their machines with other jobs. The A/B rounds and the confirmation keep false alarms rare, but a dedicated runner gives smaller intervals.
 
 A hosted runner shares its CPU. Speedpatrol's defenses are the alternating rounds, outlier trimming, the double significance test and the thresholds; raise `rounds` to 3 or 4 on a hosted runner, or use a dedicated runner and `SPEEDPATROL_MACHINE` for tight intervals.
