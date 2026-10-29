@@ -19,6 +19,8 @@ export type Tool = {
   description: string;
   /** JSON Schema for the input object. */
   inputSchema: Record<string, unknown>;
+  /** Runs the app (an A/B, a benchmark): never at the same time as another exclusive tool, which would share its port and checkouts. */
+  exclusive?: boolean;
   run(input: Record<string, unknown>): Promise<ToolResult>;
 };
 

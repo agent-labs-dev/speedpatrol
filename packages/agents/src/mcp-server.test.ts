@@ -40,4 +40,35 @@ describe('serveTools', () => {
       await mcp.close();
     }
   });
+
+  it('runs two exclusive calls with different inputs one after the other', async () => {
+    let active = 0;
+    let overlapped = false;
+    const mcp = await serveTools([
+      {
+        name: 'measure_commit',
+        description: 'slow',
+        inputSchema: { type: 'object', properties: { sha: { type: 'string' } } },
+        exclusive: true,
+        run: async () => {
+          active++;
+          if (active > 1) overlapped = true;
+          await new Promise((done) => setTimeout(done, 100));
+          active--;
+          return { text: 'done' };
+        },
+      },
+    ]);
+    try {
+      const client = await connect(mcp.url);
+      await Promise.all([
+        client.callTool({ name: 'measure_commit', arguments: { sha: 'a' } }),
+        client.callTool({ name: 'measure_commit', arguments: { sha: 'b' } }),
+      ]);
+      expect(overlapped).toBe(false);
+      await client.close();
+    } finally {
+      await mcp.close();
+    }
+  });
 });

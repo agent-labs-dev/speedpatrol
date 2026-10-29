@@ -40,12 +40,13 @@ export async function serveTools(
 ): Promise<{ url: string; close(): Promise<void> }> {
   const budget = { calls: 0, max: options.maxCalls ?? Number.POSITIVE_INFINITY };
   const running = new Map<string, Promise<ToolResult>>();
+  const lane = { tail: Promise.resolve() as Promise<unknown> };
   const http = createServer((request, response) => {
     if (request.url !== '/mcp') {
       response.writeHead(404).end();
       return;
     }
-    void handle(request, response, tools, options, budget, running).catch((error) => {
+    void handle(request, response, tools, options, budget, running, lane).catch((error) => {
       if (!response.headersSent) response.writeHead(500).end(String(error));
     });
   });
@@ -74,6 +75,7 @@ async function handle(
   options: Options,
   budget: { calls: number; max: number },
   running: Map<string, Promise<ToolResult>>,
+  lane: { tail: Promise<unknown> },
 ): Promise<void> {
   const server = new Server({ name: 'speedpatrol', version: '0.0.0' }, { capabilities: { tools: {} } });
   server.setRequestHandler(ListToolsRequestSchema, async () => ({
@@ -95,7 +97,13 @@ async function handle(
       const result = await joined;
       return { content: [{ type: 'text' as const, text: result.text }], isError: result.isError ?? false };
     }
-    const pending = callTool(tools, call.params.name, input, budget);
+    // A model may call two exclusive tools in one turn (the analyst bisects
+    // two commits at once); run them one after the other.
+    const exclusive = tools.find((item) => item.name === call.params.name)?.exclusive ?? false;
+    const pending = exclusive
+      ? lane.tail.then(() => callTool(tools, call.params.name, input, budget))
+      : callTool(tools, call.params.name, input, budget);
+    if (exclusive) lane.tail = pending;
     running.set(key, pending);
     const result = await pending.finally(() => running.delete(key));
     options.onCall?.(call.params.name, input, result, Date.now() - started);

@@ -107,8 +107,13 @@ export class CliRuntime implements Runtime {
       const child = spawn('/bin/sh', ['-c', command], {
         cwd: task.workdir,
         // measure_change runs for minutes; Claude Code's default MCP tool
-        // timeout abandons it and the agent calls it again over the first.
-        env: { MCP_TOOL_TIMEOUT: String(task.timeoutMs), ...process.env },
+        // timeout abandons it and the agent calls it again over the first. It also
+        // aborts any call silent for 300 s (an A/B, or a call queued behind one).
+        env: {
+          MCP_TOOL_TIMEOUT: String(task.timeoutMs),
+          CLAUDE_CODE_MCP_TOOL_IDLE_TIMEOUT: String(task.timeoutMs),
+          ...process.env,
+        },
         detached: true,
         stdio: ['pipe', 'pipe', 'pipe'],
       });

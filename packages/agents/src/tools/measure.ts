@@ -52,5 +52,6 @@ export function measureCommitTool(loaded: LoadedConfig, store: Store, log: (line
         summary: `${head.sha.slice(0, 8)} vs ${base.sha.slice(0, 8)}: ${comparison.verdict}.`,
       };
     },
+    { exclusive: true },
   );
 }
