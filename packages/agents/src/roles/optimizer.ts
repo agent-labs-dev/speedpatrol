@@ -112,6 +112,7 @@ export async function runOptimizer(options: {
           });
           return { text: comparisonMarkdown(comparison), summary: `Measured: ${comparison.verdict}.` };
         },
+        { exclusive: true },
       ),
       tool('git_diff', 'Your changes so far.', {}, [], async () => ({
         text: (await tryGit(worktree, ['diff', 'HEAD'])) || 'No changes yet.',

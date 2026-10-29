@@ -9,12 +9,14 @@ export function tool(
   fields: Record<string, Field>,
   required: string[],
   run: (input: Record<string, unknown>) => Promise<ToolResult>,
+  options: { exclusive?: boolean } = {},
 ): Tool {
   return {
     name,
     description,
     inputSchema: { type: 'object', properties: fields, required, additionalProperties: false },
     run,
+    ...options,
   };
 }
 
