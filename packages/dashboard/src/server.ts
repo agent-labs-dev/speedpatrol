@@ -83,15 +83,16 @@ async function handle(req: IncomingMessage, res: ServerResponse, data: Dashboard
   if (req.method !== 'GET' && req.method !== 'HEAD') throw new HttpError(405, 'read-only');
   // The raw path, not a URL-normalised one: `/api/runs/../x` must be refused, not quietly resolved.
   const raw = (req.url ?? '/').split('?')[0]!;
-  const query = new URL(req.url ?? '/', 'http://localhost').searchParams;
   const parts = raw.split('/').slice(1);
   if (parts[0] !== 'api') return serveUi(res, raw);
 
   const [, resource, key, sub, ...rest] = parts;
   if (rest.length) throw new HttpError(404, 'not found');
   switch (resource) {
-    case 'overview':
-      return json(res, await data.overview());
+    case 'summary':
+      return json(res, await data.summary());
+    case 'agents':
+      return json(res, await data.agentsAndPatrol());
     case 'benchmarks':
       // Benchmark ids are looked up in run data, never used as paths, but hold them to the same alphabet.
       return json(res, key ? found(await data.benchmark(id(key)), 'benchmark') : await data.benchmarks());
@@ -107,10 +108,6 @@ async function handle(req: IncomingMessage, res: ServerResponse, data: Dashboard
       if (!key) return json(res, await data.sessions());
       if (sub !== 'events') throw new HttpError(404, 'not found');
       return json(res, await data.store.events(id(key)));
-    case 'activity': {
-      const limit = Number(query.get('limit') ?? 60);
-      return json(res, await data.activity(Number.isFinite(limit) ? Math.max(1, Math.min(500, limit)) : 60));
-    }
     default:
       throw new HttpError(404, 'not found');
   }

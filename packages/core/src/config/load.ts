@@ -39,6 +39,11 @@ export function findConfigDir(cwd: string): string | undefined {
 export async function loadConfig(cwd: string): Promise<LoadedConfig> {
   const dir = findConfigDir(cwd);
   if (!dir) throw new ConfigError(`No ${CONFIG_DIR}/${CONFIG_FILE} here or above. Run \`speedpatrol init\`.`);
+  return loadConfigDir(dir);
+}
+
+/** Loads the config of a known `.speedpatrol` folder, without a search. */
+export async function loadConfigDir(dir: string): Promise<LoadedConfig> {
   const file = join(dir, CONFIG_FILE);
   let raw: unknown;
   try {

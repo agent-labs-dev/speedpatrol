@@ -1,60 +1,11 @@
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { request } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { type Run, Store, type Summary } from '@speedpatrol/core';
+import { Store } from '@speedpatrol/core';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { comparison, regression, result, run } from './fixtures.js';
 import { type Dashboard, startDashboard } from './server.js';
-
-const summary = (median: number): Summary => ({
-  n: 3,
-  min: median - 1,
-  max: median + 1,
-  mean: median,
-  median,
-  p75: median + 0.5,
-  p90: median + 0.8,
-  p95: median + 0.9,
-  p99: median + 1,
-  stddev: 1,
-  mad: 1,
-  cv: 1 / median,
-});
-
-function run(id: string, sha: string, median: number): Run {
-  return {
-    id,
-    purpose: 'baseline',
-    startedAt: `2026-10-0${id.slice(-1)}T00:00:00.000Z`,
-    finishedAt: `2026-10-0${id.slice(-1)}T00:01:00.000Z`,
-    source: { dir: '/app', sha, dirty: false, subject: `commit ${sha}` },
-    machine: {
-      fingerprint: 'm1',
-      hostname: 'h',
-      platform: 'linux',
-      arch: 'x64',
-      cpuModel: 'cpu',
-      cpus: 4,
-      memoryGb: 8,
-      node: '22.0.0',
-    },
-    benchmarksHash: 'h',
-    results: [
-      {
-        benchmark: 'api.items',
-        kind: 'http',
-        primary: 'total_ms',
-        metrics: {
-          total_ms: { unit: 'ms', better: 'lower', values: [median], summary: summary(median) },
-        },
-        iterations: 3,
-        errors: [],
-        durationMs: 100,
-        critical: true,
-      },
-    ],
-  };
-}
 
 /** The raw request line, so a `..` reaches the server instead of being normalised by a URL parser. */
 function get(base: string, path: string): Promise<{ status: number; body: string }> {
@@ -72,15 +23,27 @@ function get(base: string, path: string): Promise<{ status: number; body: string
   });
 }
 
+const getJson = async (base: string, path: string) => JSON.parse((await get(base, path)).body);
+
+const BENCHMARKS = [
+  { id: 'api.items', kind: 'http', critical: true, request: { url: 'http://localhost:3000/items' } },
+  { id: 'web.home', kind: 'web', url: 'http://localhost:3000/' },
+  { id: 'web.checkout', kind: 'web', url: 'http://localhost:3000/checkout' },
+];
+
 describe('dashboard server', () => {
   let dir: string;
   let dashboard: Dashboard;
 
   beforeAll(async () => {
     dir = await mkdtemp(join(tmpdir(), 'speedpatrol-dashboard-'));
+    await writeFile(join(dir, 'speedpatrol.yml'), 'version: 1\nproject:\n  name: demo\n');
+    await writeFile(join(dir, 'benchmarks.json'), JSON.stringify({ benchmarks: BENCHMARKS }));
     const store = new Store(dir);
-    for (const [index, median] of [10, 10.2, 14].entries()) {
-      const item = run(`r${index + 1}`, `sha${index + 1}`, median);
+    const baselines = [10, 10.2, 14].map((median, index) =>
+      run(`r${index + 1}`, index + 1, [result('api.items', median, { critical: true }), result('web.home', 5)]),
+    );
+    for (const item of baselines) {
       await store.saveRun(item);
       await store.addBaseline({
         sha: item.source.sha,
@@ -90,6 +53,26 @@ describe('dashboard server', () => {
         at: item.finishedAt,
       });
     }
+    // A later baseline whose app did not come up: the store keeps it out of the trend.
+    await store.saveRun(run('r4', 4, [], { failed: 'The app did not come up.' }));
+    await store.saveComparison(comparison('c1', baselines[1]!, baselines[2]!, 'regression'));
+    await store.saveRegression(regression('reg1', { comparisonId: 'c1' }));
+    // A session with no finish event, and no live agent that owns it.
+    await store.appendEvent({
+      at: '2026-10-03T00:00:00.000Z',
+      sessionId: 's1',
+      role: 'optimizer',
+      kind: 'start',
+      summary: 'Try a speed-up',
+    });
+    await store.appendEvent({
+      at: '2026-10-03T00:00:09.000Z',
+      sessionId: 's1',
+      role: 'optimizer',
+      kind: 'tool-call',
+      summary: 'Edit',
+      tool: 'edit_file',
+    });
     dashboard = await startDashboard({ configDir: dir, port: 0 });
   });
 
@@ -98,19 +81,75 @@ describe('dashboard server', () => {
     await rm(dir, { recursive: true, force: true });
   });
 
-  it('serves the benchmark trend over baseline commits', async () => {
-    const { status, body } = await get(dashboard.url, '/api/benchmarks');
-    expect(status).toBe(200);
-    const [row] = JSON.parse(body).benchmarks;
-    expect(row.series.map((point: { sha: string }) => point.sha)).toEqual(['sha1', 'sha2', 'sha3']);
-    expect(row.latest.median).toBe(14);
-    expect(row.deltaPct).toBeCloseTo(14 / 10.2 - 1);
+  it('serves one summary with the failed last run, the open regression, and the coverage', async () => {
+    const summary = await getJson(dashboard.url, '/api/summary');
+    expect(summary.name).toBe('demo');
+    expect(summary.lastRun).toMatchObject({ id: 'r4', failed: 'The app did not come up.' });
+    expect(summary.verdict.tone).toBe('fail');
+    expect(summary.regressions.open).toBe(1);
+    expect(summary.benchmarks).toMatchObject({ defined: 3, measured: 2, unmeasured: ['web.checkout'] });
+    expect(summary.attention.map((item: { title: string }) => item.title)).toEqual([
+      'The last run failed',
+      'api.items got 30% slower',
+      '1 benchmark has no baseline',
+    ]);
   });
 
-  it('reports the latest baseline in the overview and 404s an unknown run', async () => {
-    const overview = JSON.parse((await get(dashboard.url, '/api/overview')).body);
-    expect(overview.latest.sha).toBe('sha3');
+  it('serves the benchmark trend, problems first, with a row for each defined benchmark', async () => {
+    const { benchmarks } = await getJson(dashboard.url, '/api/benchmarks');
+    expect(benchmarks.map((row: { id: string; problem?: string }) => [row.id, row.problem ?? null])).toEqual([
+      ['api.items', 'regression'],
+      ['web.checkout', 'unmeasured'],
+      ['web.home', null],
+    ]);
+    const [items] = benchmarks;
+    expect(items.series.map((point: { sha: string }) => point.sha)).toEqual(['sha-r1', 'sha-r2', 'sha-r3']);
+    expect(items.latest.median).toBe(14);
+    expect(items.deltaPct).toBeCloseTo(14 / 10.2 - 1);
+    expect(items.regression).toMatchObject({ id: 'reg1', status: 'open' });
+  });
+
+  it('marks each run with its comparison, and the oldest baseline as the first', async () => {
+    const runs = await getJson(dashboard.url, '/api/runs');
+    const byId = Object.fromEntries(runs.map((item: { id: string }) => [item.id, item]));
+    expect(runs[0].id).toBe('r4');
+    expect(byId.r4.failed).toBe('The app did not come up.');
+    expect(byId.r3.comparison).toEqual({ id: 'c1', verdict: 'regression', mode: 'baseline' });
+    expect(byId.r1.first).toBe(true);
+    expect(byId.r2.first).toBe(false);
+  });
+
+  it('shows a session with no finish and no live agent as stopped, not running', async () => {
+    const [session] = await getJson(dashboard.url, '/api/sessions');
+    expect(session).toMatchObject({
+      id: 's1',
+      state: 'stopped',
+      goal: 'Try a speed-up',
+      toolCalls: 1,
+      durationMs: 9000,
+    });
+    const events = await getJson(dashboard.url, '/api/sessions/s1/events');
+    expect(events).toHaveLength(2);
+  });
+
+  it('reports a config that does not load in the summary, and still serves the data', async () => {
+    const broken = await mkdtemp(join(tmpdir(), 'speedpatrol-dashboard-'));
+    await writeFile(join(broken, 'speedpatrol.yml'), 'version: 7\n');
+    const other = await startDashboard({ configDir: broken, port: 0 });
+    try {
+      const summary = await getJson(other.url, '/api/summary');
+      expect(summary.verdict.text).toBe('Config error');
+      expect(summary.configError).toContain('speedpatrol.yml');
+      expect((await get(other.url, '/api/benchmarks')).status).toBe(200);
+    } finally {
+      await other.close();
+      await rm(broken, { recursive: true, force: true });
+    }
+  });
+
+  it('404s an unknown run and an unknown route', async () => {
     expect((await get(dashboard.url, '/api/runs/nope')).status).toBe(404);
+    expect((await get(dashboard.url, '/api/overview')).status).toBe(404);
   });
 
   it('serves the UI at /', async () => {

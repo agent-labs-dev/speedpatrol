@@ -5,20 +5,36 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Speedpatrol</title>
 <link rel="stylesheet" href="/style.css">
+<script>
+  {
+    // Before the first paint: the saved choice, or else the system setting. app.js owns the toggle.
+    const saved = localStorage.getItem('speedpatrol-theme');
+    const system = matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
+    document.documentElement.dataset.theme = saved === 'light' || saved === 'dark' ? saved : system;
+  }
+</script>
 </head>
 <body>
 <header class="topbar">
-  <a class="brand" href="#/">
+  <a class="brand" href="#/" aria-label="Speedpatrol overview">
     <span class="mark" aria-hidden="true"></span>
-    <span class="brand-name">Speedpatrol</span>
-    <span class="brand-sep" aria-hidden="true">/</span>
-    <strong id="project-name">…</strong>
+    <strong id="project-name">Speedpatrol</strong>
   </a>
-  <div class="meta" id="meta"></div>
-  <span id="live" class="live" title="Polling the local .speedpatrol folder every 3 seconds">live</span>
+  <nav class="tabs" id="tabs" aria-label="Pages">
+    <a href="#/" data-page="overview">Overview</a>
+    <a href="#/benchmarks" data-page="benchmarks">Benchmarks</a>
+    <a href="#/regressions" data-page="regressions">Regressions</a>
+    <a href="#/experiments" data-page="experiments">Experiments</a>
+    <a href="#/runs" data-page="runs">Runs</a>
+    <a href="#/activity" data-page="activity">Activity</a>
+  </nav>
+  <div class="tools">
+    <span id="patrol" class="icon-chip" role="img"></span>
+    <span id="machine" class="icon-chip" role="img"></span>
+    <span id="live" class="live" role="status"></span>
+    <button type="button" id="theme" class="icon-button"></button>
+  </div>
 </header>
-
-<section class="agents" id="agents" aria-label="Agents"></section>
 
 <main id="view"></main>
 

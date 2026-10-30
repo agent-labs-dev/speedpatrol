@@ -10,12 +10,14 @@ import {
   type Better,
   type Comparison,
   type Hotspot,
+  loadConfigDir,
   type Run,
   Store,
   type Summary,
   type Unit,
   type Verdict,
 } from '@speedpatrol/core';
+import { type DefinedBenchmark, isOpen, type ProjectSummary, projectSummary } from './summary.js';
 
 /** The roles the header always shows, in this order, whether or not they ever ran. */
 const ROLES = ['scout', 'analyst', 'optimizer', 'runner', 'patrol'] as const;
@@ -53,17 +55,35 @@ export type BenchmarkRow = {
   deltaPct?: number;
   /** The statistical verdict of that step, when a comparison of the two commits exists. */
   verdict?: Verdict;
+  /** The open or filed regression of this benchmark. */
+  regression?: { id: string; status: string; deltaPct: number; metric: string; badSha: string };
+  /** Errors in the newest baseline result. */
+  errors: number;
+  /**
+   * What needs a look first: an open regression, errors, no baseline at all,
+   * or a benchmark that the newest baseline did not measure.
+   */
+  problem?: 'regression' | 'errors' | 'unmeasured' | 'stale';
   series: Point[];
 };
+
+const PROBLEM_ORDER = ['regression', 'errors', 'unmeasured', 'stale', undefined];
 
 export type SessionView = {
   id: string;
   role?: string;
+  /** The summary of the start event: what the session set out to do. */
+  goal?: string;
   startedAt?: string;
   lastAt?: string;
+  durationMs?: number;
   events: number;
+  toolCalls: number;
+  errors: number;
+  costUsd?: number;
   last?: string;
-  state: 'running' | 'done' | 'failed' | 'empty';
+  /** `stopped`: no finish event, and no live agent owns the session any more. */
+  state: 'running' | 'stopped' | 'done' | 'failed' | 'empty';
 };
 
 function pidAlive(pid: number): boolean {
@@ -148,43 +168,42 @@ export class DashboardData {
     return { machine, runs: runs.filter((run): run is Run => run !== undefined && !run.failed) };
   }
 
-  async overview() {
-    const [project, agents, runs, baselines, regressions, experiments, comparisons, patrol] = await Promise.all([
+  /** The benchmarks of the config, or the error that stops the load. */
+  async config(): Promise<{ benchmarks: DefinedBenchmark[] } | { error: string }> {
+    try {
+      const { benchmarks } = await loadConfigDir(this.configDir);
+      return { benchmarks: benchmarks.map(({ id, critical, kind }) => ({ id, critical, kind })) };
+    } catch (error) {
+      return { error: error instanceof Error ? error.message : String(error) };
+    }
+  }
+
+  async summary(): Promise<ProjectSummary> {
+    const [name, config, agents, runs, baselines, comparisons, regressions, experiments] = await Promise.all([
       this.projectName(),
+      this.config(),
       this.agents(),
       this.store.listRuns(),
       this.baselineRuns(),
+      this.store.listComparisons(),
       this.store.listRegressions(),
       this.store.listExperiments(),
-      this.store.listComparisons(),
-      this.store.patrolState(),
     ]);
-    const latest = baselines.runs.at(-1) ?? runs.sort((a, b) => a.startedAt.localeCompare(b.startedAt)).at(-1);
-    return {
-      project: { name: project },
-      latest: latest
-        ? {
-            runId: latest.id,
-            purpose: latest.purpose,
-            sha: latest.source.sha,
-            subject: latest.source.subject,
-            branch: latest.source.branch,
-            startedAt: latest.startedAt,
-            machine: latest.machine,
-            benchmarks: latest.results.length,
-          }
-        : null,
-      counts: {
-        runs: runs.length,
-        baselines: baselines.runs.length,
-        comparisons: comparisons.length,
-        openRegressions: regressions.filter((item) => item.status === 'open' || item.status === 'filed').length,
-        improvedExperiments: experiments.filter((item) => item.status === 'improved' || item.status === 'published')
-          .length,
-      },
-      agents,
-      patrol,
-    };
+    return projectSummary({
+      name,
+      config,
+      runs,
+      baselines: baselines.runs,
+      comparisons,
+      regressions,
+      experiments,
+      stoppedAgents: agents.filter((agent) => agent.state === 'stopped').map((agent) => agent.role),
+    });
+  }
+
+  async agentsAndPatrol() {
+    const [agents, patrol] = await Promise.all([this.agents(), this.store.patrolState()]);
+    return { agents, patrol };
   }
 
   /** The comparison of exactly these two commits, newest first. */
@@ -196,7 +215,12 @@ export class DashboardData {
   }
 
   async benchmarks(): Promise<{ machine?: string; benchmarks: BenchmarkRow[] }> {
-    const [{ machine, runs }, comparisons] = await Promise.all([this.baselineRuns(), this.store.listComparisons()]);
+    const [{ machine, runs }, comparisons, regressions, config] = await Promise.all([
+      this.baselineRuns(),
+      this.store.listComparisons(),
+      this.store.listRegressions(),
+      this.config(),
+    ]);
     const latestRun = runs.at(-1);
     const step = this.stepComparison(comparisons, runs.at(-2), latestRun);
     const rows = new Map<string, BenchmarkRow>();
@@ -210,10 +234,11 @@ export class DashboardData {
           primary: result.primary,
           unit: series?.unit ?? 'ms',
           better: series?.better ?? 'lower',
+          errors: 0,
           series: [],
         };
         // The newest run's definition wins: the primary metric or criticality may have changed.
-        Object.assign(row, { kind: result.kind, critical: result.critical });
+        Object.assign(row, { kind: result.kind, critical: result.critical, errors: result.errors.length });
         if (series && result.primary === row.primary) row.series.push(point(run, series.summary));
         if (series && result.primary !== row.primary) {
           Object.assign(row, { primary: result.primary, unit: series.unit, better: series.better });
@@ -222,17 +247,56 @@ export class DashboardData {
         rows.set(result.benchmark, row);
       }
     }
+    // A benchmark of the config with no baseline yet is a row too, so that it cannot hide.
+    for (const defined of 'benchmarks' in config ? config.benchmarks : []) {
+      if (rows.has(defined.id)) continue;
+      rows.set(defined.id, {
+        id: defined.id,
+        kind: defined.kind,
+        critical: defined.critical,
+        primary: '',
+        unit: 'ms',
+        better: 'lower',
+        errors: 0,
+        series: [],
+      });
+    }
+    const open = newestFirst(regressions.filter(isOpen));
     for (const row of rows.values()) {
       const latest = row.series.at(-1);
       const previous = row.series.at(-2);
+      const inLatest = latestRun?.results.some((result) => result.benchmark === row.id) ?? false;
       row.latest = latest?.runId === latestRun?.id ? latest : undefined;
       if (row.latest && previous) row.deltaPct = row.latest.median / previous.median - 1;
       row.verdict = step?.metrics.find(
         (metric) => metric.benchmark === row.id && metric.metric === row.primary,
       )?.verdict;
+      if (!inLatest) row.errors = 0;
+      const regression = open.find((item) => item.benchmark === row.id);
+      if (regression) {
+        row.regression = {
+          id: regression.id,
+          status: regression.status,
+          deltaPct: regression.deltaPct,
+          metric: regression.metric,
+          badSha: regression.badSha,
+        };
+      }
+      row.problem = regression
+        ? 'regression'
+        : row.errors
+          ? 'errors'
+          : !row.series.length
+            ? 'unmeasured'
+            : !inLatest
+              ? 'stale'
+              : undefined;
     }
     const benchmarks = [...rows.values()].sort(
-      (a, b) => Number(b.critical) - Number(a.critical) || a.id.localeCompare(b.id),
+      (a, b) =>
+        PROBLEM_ORDER.indexOf(a.problem) - PROBLEM_ORDER.indexOf(b.problem) ||
+        Number(b.critical) - Number(a.critical) ||
+        a.id.localeCompare(b.id),
     );
     return { machine, benchmarks };
   }
@@ -291,22 +355,41 @@ export class DashboardData {
   }
 
   async runs() {
-    const runs = await this.store.listRuns();
+    const [runs, comparisons] = await Promise.all([this.store.listRuns(), this.store.listComparisons()]);
+    // The oldest baseline of each machine has no earlier one to compare with.
+    const first = new Map<string, string>();
+    for (const run of [...runs].sort((a, b) => a.startedAt.localeCompare(b.startedAt))) {
+      if (run.purpose === 'baseline' && !run.failed && !first.has(run.machine.fingerprint)) {
+        first.set(run.machine.fingerprint, run.id);
+      }
+    }
+    const byHead = new Map<string, Comparison>();
+    for (const comparison of newestFirst(comparisons).reverse()) {
+      for (const runId of comparison.head.runs) byHead.set(runId, comparison);
+    }
     return runs
       .sort((a, b) => b.startedAt.localeCompare(a.startedAt))
-      .map((run) => ({
-        id: run.id,
-        purpose: run.purpose,
-        startedAt: run.startedAt,
-        finishedAt: run.finishedAt,
-        sha: run.source.sha,
-        subject: run.source.subject,
-        branch: run.source.branch,
-        dirty: run.source.dirty,
-        machine: run.machine.fingerprint,
-        benchmarks: run.results.length,
-        failed: run.failed,
-      }));
+      .map((run) => {
+        const comparison = byHead.get(run.id);
+        return {
+          id: run.id,
+          purpose: run.purpose,
+          startedAt: run.startedAt,
+          finishedAt: run.finishedAt,
+          sha: run.source.sha,
+          subject: run.source.subject,
+          branch: run.source.branch,
+          dirty: run.source.dirty,
+          machine: run.machine.fingerprint,
+          benchmarks: run.results.length,
+          errors: run.results.filter((result) => result.errors.length).length,
+          failed: run.failed,
+          first: first.get(run.machine.fingerprint) === run.id,
+          comparison: comparison
+            ? { id: comparison.id, verdict: comparison.verdict, mode: comparison.mode }
+            : undefined,
+        };
+      });
   }
 
   async comparisons() {
@@ -336,16 +419,11 @@ export class DashboardData {
   }
 
   async sessions(): Promise<SessionView[]> {
-    const ids = await this.store.sessions();
+    const [ids, agents] = await Promise.all([this.store.sessions(), this.agents()]);
+    const live = new Set(agents.filter((agent) => agent.state === 'running').map((agent) => agent.sessionId));
     const views = await Promise.all(ids.map(async (id) => sessionView(id, await this.store.events(id))));
+    for (const view of views) if (view.state === 'running' && !live.has(view.id)) view.state = 'stopped';
     return views.sort((a, b) => (b.lastAt ?? '').localeCompare(a.lastAt ?? ''));
-  }
-
-  /** The newest events across the most recent sessions, newest first. */
-  async activity(limit: number): Promise<AgentEvent[]> {
-    const sessions = (await this.sessions()).slice(0, 10);
-    const events = (await Promise.all(sessions.map((session) => this.store.events(session.id)))).flat();
-    return events.sort((a, b) => b.at.localeCompare(a.at)).slice(0, limit);
   }
 }
 
@@ -364,13 +442,19 @@ function hotspotsOf(
 function sessionView(id: string, events: AgentEvent[]): SessionView {
   const first = events[0];
   const last = events.at(-1);
-  if (!first || !last) return { id, events: 0, state: 'empty' };
+  if (!first || !last) return { id, events: 0, toolCalls: 0, errors: 0, state: 'empty' };
+  const cost = events.reduce((sum, event) => sum + (event.costUsd ?? 0), 0);
   return {
     id,
     role: first.role,
+    goal: events.find((event) => event.kind === 'start')?.summary,
     startedAt: first.at,
     lastAt: last.at,
+    durationMs: Date.parse(last.at) - Date.parse(first.at),
     events: events.length,
+    toolCalls: events.filter((event) => event.kind === 'tool-call').length,
+    errors: events.filter((event) => event.kind === 'error').length,
+    ...(cost ? { costUsd: cost } : {}),
     last: last.summary,
     state: last.kind === 'error' ? 'failed' : last.kind === 'finish' ? 'done' : 'running',
   };
