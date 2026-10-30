@@ -53,9 +53,9 @@ flowchart TB
   style legend fill:transparent,stroke:#64748b
 ```
 
-<img src="assets/dashboard.png" alt="The Speedpatrol dashboard: the agent cards, the benchmark trends, the regressions, the experiments, and the agent activity." width="100%">
+<img src="assets/dashboard.png" alt="The Speedpatrol dashboard: the status band, the items that need attention, the benchmarks, the recent runs, and the agents." width="100%">
 
-The dashboard (`npx speedpatrol dashboard`) shows the benchmark trends, the regressions, the experiments, and each agent, live.
+The dashboard (`npx speedpatrol dashboard`) shows the status of the project first: the open regressions, what waits for you, and the next command. Then it shows the benchmark trends, the runs, the experiments, and each agent, live.
 
 ## Set up with your agent
 
