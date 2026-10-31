@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Report a security vulnerability
+    url: https://github.com/agent-labs-dev/speedpatrol/security/advisories/new
+    about: Report it privately, not in a public issue. See SECURITY.md.
+  - name: Troubleshooting
+    url: https://github.com/agent-labs-dev/speedpatrol/blob/main/docs/troubleshooting.md
+    about: Common setup, timing and agent failures, and their fixes.

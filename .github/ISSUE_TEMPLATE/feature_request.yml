@@ -1,0 +1,15 @@
+name: Feature request
+description: A benchmark kind, a metric, an agent runtime, or another idea.
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What you want to measure or do
+      description: The app, the path users wait for, and why Speedpatrol cannot handle it today.
+    validations:
+      required: true
+  - type: textarea
+    id: idea
+    attributes:
+      label: What you propose

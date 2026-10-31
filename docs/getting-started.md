@@ -67,3 +67,38 @@ PLAYWRIGHT_SKIP_BROWSER_GC=1 npx -y playwright@1.64.1 install chromium
    ```
 
 [examples/fixture-app](../examples/fixture-app/.speedpatrol/speedpatrol.yml) has a complete config. [Configuration](configuration.md) tells each field. [Commands](commands.md) tells each command.
+
+## Try it on the fixture app first
+
+The repo's fixture app is a small server, page and CLI with a complete config. Measuring it takes about a minute and shows what a first baseline, a caught regression and an A/B run look like, before you set up your own app.
+
+```bash
+git clone --depth 1 https://github.com/agent-labs-dev/speedpatrol /tmp/speedpatrol
+cp -r /tmp/speedpatrol/examples/fixture-app /tmp/fixture-app
+cd /tmp/fixture-app
+git init -q -b main && echo ".speedpatrol/runs/" > .gitignore
+git add -A && git commit -qm "fixture app"
+
+npx speedpatrol doctor
+npx speedpatrol run api.items cli.work   # the first baseline: medians, nothing to compare yet
+```
+
+Now make `/api/items` 30 ms slower, commit it, and measure again:
+
+```bash
+sed -i.bak "/url.pathname === '\/api\/items'/a\\
+    const until = Date.now() + 30; while (Date.now() < until) {}
+" server.js && rm server.js.bak
+git commit -qam "slow items"
+
+npx speedpatrol run api.items cli.work --fail-on-regression   # exit 1
+npx speedpatrol compare --base HEAD~1 --head HEAD api.items   # the same, as an A/B run
+```
+
+The second `run` compares with the first commit's baseline and reports `🔴 regression` for `api.items`: `total_ms` goes from about 2 ms to about 32 ms, with p < 0.01. `npx speedpatrol dashboard` shows both runs.
+
+## Next
+
+- [Running a patrol](running-a-patrol.md): install, the machine, the patrol as a service or as scheduled steps, test accounts, agent time limits, and GitHub.
+- [Troubleshooting](troubleshooting.md): the common failures and their fixes.
+- [examples/electron-app](../examples/electron-app): a runnable config for a desktop app (a cold launch, screen navigation, a reload).
