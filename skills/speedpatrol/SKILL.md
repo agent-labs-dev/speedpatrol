@@ -74,7 +74,7 @@ Every benchmark must show a median and no errors. Fix the config until it does. 
 
 - `npx speedpatrol@latest run`: measure this checkout and record its baseline (clean tree only).
 - `npx speedpatrol@latest compare`: working tree vs `origin/main`, A/B. `--head <dir|ref>`, `--base <ref>`, benchmark ids or tags as arguments. Exit 1 = regression.
-- `npx speedpatrol@latest`: the patrol, all day, on a dedicated machine or VM. `--once` for one cycle.
+- `npx speedpatrol@latest`: the patrol, all day, on a dedicated machine or VM. `--once` for one cycle. Before you set one up, read https://github.com/agent-labs-dev/speedpatrol/blob/main/docs/running-a-patrol.md (scheduling, test accounts, agent time limits, GitHub). When something fails, read https://github.com/agent-labs-dev/speedpatrol/blob/main/docs/troubleshooting.md.
 - `npx speedpatrol@latest dashboard`: http://127.0.0.1:4321.
 - `npx speedpatrol@latest regressions`, `analyze`, `optimize <benchmark>`, `publish --dry-run`.
 

@@ -36,7 +36,7 @@ thresholds:
   maxCv: 0.15
 agents:
   scout: { use: claude, maxSteps: 60, timeoutMinutes: 30 }
-  analyst: { use: claude }
+  analyst: { use: claude, timeoutMinutes: 30 }   # raise it when one A/B run takes minutes
   optimizer: { use: claude, enabled: false, maxPerCycle: 1, minImprovement: 0.05 }
   # optimizer.commitScope: app   # commit/PR scope when the repo allows only its own (default: benchmark id)
   github: { enabled: false, pullRequests: draft, labels: [speedpatrol] }
@@ -165,3 +165,5 @@ The command prints `{"metrics": {"render_ms": 12.3, "fps": 58}}` (or the list fo
 ## Agents
 
 `use` is a preset (`claude`, `codex`, `opencode`), a command (`{ runtime: cli, command: "..." }` with `{prompt}`, `{mcp}`, `{mcpUrl}`, `{workdir}`), or a model (`{ runtime: model, via: openrouter | openai | anthropic | custom, model: "...", endpoint: "..." }`, keys from `OPENROUTER_API_KEY`, `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `SPEEDPATROL_MODEL_API_KEY`).
+
+Each role also takes `maxSteps` (60), `timeoutMinutes` (30) and `budgetUsd` (model runtime only). [Agent time limits](running-a-patrol.md#agent-time-limits) tells how to size them.

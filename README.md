@@ -96,6 +96,8 @@ To set up by hand, read [Getting started](docs/getting-started.md).
 | [Commands](docs/commands.md) | Each command, the patrol, and the two ways to compare |
 | [Benchmarks and metrics](docs/benchmarks.md) | The benchmark kinds, their metrics, and the profiles |
 | [Configuration](docs/configuration.md) | Each field of `speedpatrol.yml` |
+| [Running a patrol](docs/running-a-patrol.md) | Install, the machine, scheduling, test accounts, agent time limits, and GitHub |
+| [Troubleshooting](docs/troubleshooting.md) | Common failures and their fixes |
 | [How it works](docs/how-it-works.md) | The measurement protocol, the statistics, and the patrol cycle |
 | [Agents](docs/agents.md) | The roles, the runtimes, and the tools |
 | [Dashboard](docs/dashboard.md) | What the dashboard shows |
