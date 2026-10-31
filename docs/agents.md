@@ -46,4 +46,4 @@ The prompt goes to the command's stdin and to the file `{prompt}`. A preset is o
 
 ## Sessions
 
-Each session writes `sessions/<id>/events.jsonl` and updates `agents.json`. Every secret value (`app.secrets` and captured values) is redacted from both. A role stops at `maxSteps` tool calls, `timeoutMinutes`, or `budgetUsd` (model runtime).
+Each session writes `sessions/<id>/events.jsonl` and updates `agents.json`. Every secret value (`app.secrets` and captured values) is redacted from both. A role stops at `maxSteps` tool calls (60), `timeoutMinutes` (30), or `budgetUsd` (model runtime). [Agent time limits](running-a-patrol.md#agent-time-limits) tells how to size them.

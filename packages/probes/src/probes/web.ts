@@ -85,7 +85,7 @@ function stepMetrics(steps: FlowStep[]): Record<string, MetricSpec> {
  * click and fill skip Playwright's actionability wait (`force`). That wait
  * checks the element is stable over animation frames, and a hidden or
  * occluded window (an e2e harness's quiet window, Xvfb) gets few frames: in
- * nebula-desktop it added 1-2 s to a 40 ms screen switch, so the step timed
+ * an Electron app it added 1-2 s to a 40 ms screen switch, so the step timed
  * the tool instead of the app.
  */
 async function runStep(page: Page, step: FlowStep, context: ProbeContext): Promise<number> {

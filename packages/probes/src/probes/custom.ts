@@ -12,8 +12,8 @@ export function parseMetricsLine(stdout: string): Record<string, number> | undef
     try {
       const parsed = JSON.parse(trimmed) as { metrics?: unknown };
       if (!parsed.metrics || typeof parsed.metrics !== 'object') continue;
-      // Also the list form, [{"name": "boot_ms", "value": 812}], that perf
-      // harnesses such as nebula-desktop's `e2e --json perf` print.
+      // Also the list form, [{"name": "boot_ms", "value": 812}], that many perf
+      // harnesses print.
       if (Array.isArray(parsed.metrics)) {
         return Object.fromEntries(
           parsed.metrics
