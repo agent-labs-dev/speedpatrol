@@ -1,0 +1,61 @@
+# Speedpatrol config for an Electron app: a cold launch, screen navigation in
+# a running window, and a renderer reload. Copy the folder, run `npm install`,
+# then `npx speedpatrol run`. On a Linux machine with no screen, start Xvfb and
+# set DISPLAY first (see docs/running-a-patrol.md).
+version: 1
+project:
+  name: electron-app
+  source: .
+app:
+  instructions: instructions.md
+  prepare:
+    # Once per checkout, so an A/B run of two commits installs each side.
+    - run: npm install --no-audit --no-fund
+  setup:
+    # Starts the app once for the attach benchmarks. Speedpatrol stops it after
+    # the measurement. $SPEEDPATROL_SOURCE is the checkout being measured.
+    - run: npx electron "$SPEEDPATROL_SOURCE" --remote-debugging-port=${CDP_PORT}
+      background: true
+      readyUrl: http://127.0.0.1:${CDP_PORT}/json/version
+  env:
+    CDP_PORT: "19333"   # pick ports nothing else on the machine uses
+defaults:
+  iterations: 10
+  warmup: 2
+  timeoutMs: 60000
+thresholds:
+  relative: 0.10   # desktop timings vary more than an API's
+  absolute: 5
+benchmarks:
+  # Launches its own copy each iteration, on another port and with its own
+  # profile, and times it to the first screen. Sharing the running copy's
+  # profile made some launches never open a window.
+  - id: desktop.open
+    title: Cold launch to the Home screen
+    kind: electron
+    critical: true
+    run: npx electron . --remote-debugging-port=19334 --user-data-dir=.speedpatrol/runs/electron-open-profile
+    cdpPort: 19334
+    readySelector: '#home h1'
+  # Attaches to the app that app.setup started: each iteration runs the steps
+  # and ends on the screen it started from.
+  - id: desktop.navigate
+    title: Home -> Items -> Home in the running app
+    kind: electron
+    critical: true
+    cdpPort: ${CDP_PORT}
+    page: index.html          # only this app's window, never another app on the port
+    readySelector: '#home h1'
+    steps:
+      - { name: items, click: '#nav-items', waitFor: '#item-list li >> nth=1999' }
+      - { name: home, click: '#nav-home', waitFor: '#home h1' }
+  - id: desktop.reload
+    title: Renderer reload of the running window
+    kind: electron
+    cdpPort: ${CDP_PORT}
+    page: index.html
+    reload: true
+    readySelector: '#home h1'
+agents:
+  scout: { use: claude }
+  analyst: { use: claude }

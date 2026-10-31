@@ -12,6 +12,7 @@ pnpm knip
 - Commits and PR titles follow Conventional Commits.
 - A verdict is code (ADR 0001): a change to `packages/stats` comes with a row in its table test.
 - Tests run real processes against `examples/fixture-app`; no test may call a real model (`vitest.config.ts` blanks the keys).
+- Follow the [code of conduct](CODE_OF_CONDUCT.md). Report a vulnerability privately, as [SECURITY.md](SECURITY.md) says, never in a public issue.
 
 ## Releases
 

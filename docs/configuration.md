@@ -120,7 +120,7 @@ Without `run`, the benchmark **attaches** to an app that is already running (sta
     - { name: home, click: 'nav button:has-text("Home")', waitFor: '[data-testid=home]' }
 ```
 
-A step's clock starts after its target is found and visible, and the click skips Playwright's actionability wait: in a hidden or occluded window (an e2e quiet window, Xvfb) that wait added 1-2 s to a 40 ms screen switch. [examples/nebula-desktop](../examples/nebula-desktop) is a full config.
+A step's clock starts after its target is found and visible, and the click skips Playwright's actionability wait: in a hidden or occluded window (an e2e quiet window, Xvfb) that wait added 1-2 s to a 40 ms screen switch. [examples/electron-app](../examples/electron-app) is a full config.
 
 ### `startup`
 

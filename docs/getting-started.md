@@ -101,3 +101,4 @@ The second `run` compares with the first commit's baseline and reports `🔴 reg
 
 - [Running a patrol](running-a-patrol.md): install, the machine, the patrol as a service or as scheduled steps, test accounts, agent time limits, and GitHub.
 - [Troubleshooting](troubleshooting.md): the common failures and their fixes.
+- [examples/electron-app](../examples/electron-app): a runnable config for a desktop app (a cold launch, screen navigation, a reload).

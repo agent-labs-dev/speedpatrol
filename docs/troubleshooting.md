@@ -18,6 +18,10 @@ Start with `speedpatrol doctor`. It checks Node, git, the config, Chromium, the 
 
 **An Electron benchmark cannot start a window on Linux.** There is no display. Run Xvfb and set `DISPLAY`.
 
+**An attach benchmark waits for `readySelector` until it times out, while the app is up.** Another program (a browser, an e2e harness, a second app) already listens on `cdpPort`, so `readyUrl` answered and Speedpatrol attached to that program's window. Use a port nothing else on the machine uses, and set `page` to a part of your window's URL, so the benchmark can only attach to your app. [examples/electron-app](../examples/electron-app) does both.
+
+**Some Electron launches never open a window.** A launched copy shares its profile with a copy that is already running (the one `app.setup` started). Give the launched copy its own profile, for example `--user-data-dir=.speedpatrol/runs/open-profile`.
+
 ## Timings
 
 **Many `noisy` verdicts.** `noisy` means the change looks large but the samples vary too much (more than `thresholds.maxCv`) for a verdict. It is not a regression, and it does not start the analyst: the analyst only runs for a regression that the A/B confirmation reproduced. Usual causes, most likely first:

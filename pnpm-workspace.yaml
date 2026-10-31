@@ -1,3 +1,5 @@
 packages:
   - "packages/*"
   - "examples/*"
+  # A standalone example with its own Electron install, so the workspace never downloads Electron.
+  - "!examples/electron-app"
