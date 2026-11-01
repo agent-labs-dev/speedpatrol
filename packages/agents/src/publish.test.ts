@@ -53,6 +53,12 @@ describe('experimentTitle', () => {
     );
   });
 
+  it('says smaller when the metric is a size', () => {
+    expect(experimentTitle({ ...experiment, title: 'drop the unused locale data' }, 'web', 'kb')).toBe(
+      'perf(web): drop the unused locale data (11% smaller)',
+    );
+  });
+
   it('falls back to the benchmark when the optimizer gave no title', () => {
     expect(experimentTitle(experiment, 'mobile.navigate')).toBe(
       'perf(mobile.navigate): speed up mobile.navigate (11% faster)',
