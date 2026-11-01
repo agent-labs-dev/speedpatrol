@@ -1,7 +1,8 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
+import type { Experiment } from '@speedpatrol/core';
 import { describe, expect, it } from 'vitest';
-import { ensureLabels } from './publish.js';
+import { ensureLabels, experimentTitle } from './publish.js';
 
 const exec = promisify(execFile);
 
@@ -36,5 +37,24 @@ describe('ensureLabels', () => {
   it('surfaces any other failure', async () => {
     const gh = fakeGh('HTTP 403: Resource not accessible by integration\n');
     await expect(ensureLabels(gh.run, ['speedpatrol'])).rejects.toThrow(/403/);
+  });
+});
+
+describe('experimentTitle', () => {
+  const experiment = {
+    target: { benchmark: 'mobile.navigate', metric: 'flow_ms' },
+    deltaPct: -0.114,
+  } as Experiment;
+
+  it('names the change and the speed-up, not the metric', () => {
+    expect(experimentTitle({ ...experiment, title: 'Fetch the user before the router loads' }, 'mobile')).toBe(
+      'perf(mobile): Fetch the user before the router loads (11% faster)',
+    );
+  });
+
+  it('falls back to the benchmark when the optimizer gave no title', () => {
+    expect(experimentTitle(experiment, 'mobile.navigate')).toBe(
+      'perf(mobile.navigate): speed up mobile.navigate (11% faster)',
+    );
   });
 });

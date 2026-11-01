@@ -139,7 +139,7 @@ describe('agents over MCP', () => {
           to: "import { work } from './work.js'; // fast",
         },
       },
-      { tool: 'finish', input: { summary: 'Added a comment.' } },
+      { tool: 'finish', input: { title: 'Add a comment to the server', summary: 'Added a comment.' } },
     ]);
     const placebo = await runOptimizer({ loaded, store, benchmark, baseSha: head, log: say });
     expect(placebo.experiment.status, placebo.experiment.reason).toBe('rejected');
@@ -148,11 +148,13 @@ describe('agents over MCP', () => {
       { tool: 'get_target' },
       { tool: 'set_hypothesis', input: { hypothesis: 'work() does 20x more rounds than it needs.' } },
       { edit: { file: 'work.js', from: 'ROUNDS = 2000000', to: 'ROUNDS = 20000' } },
-      { tool: 'finish', input: { summary: 'Restored ROUNDS to 20000.' } },
+      { tool: 'finish', input: { title: 'Restore the work rounds to 20000', summary: 'Restored ROUNDS to 20000.' } },
     ]);
     const real = await runOptimizer({ loaded, store, benchmark, baseSha: head, log: say });
     expect(real.experiment.status, real.experiment.reason).toBe('improved');
     expect(real.experiment.deltaPct).toBeLessThan(-0.05);
-    expect(gitIn(real.experiment.worktree, 'log', '-1', '--format=%s')).toContain('perf(api.items)');
+    expect(gitIn(real.experiment.worktree, 'log', '-1', '--format=%s')).toBe(
+      'perf(api.items): Restore the work rounds to 20000',
+    );
   });
 });

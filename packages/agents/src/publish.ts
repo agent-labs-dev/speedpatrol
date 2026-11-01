@@ -1,7 +1,7 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { type Experiment, git, type LoadedConfig, type Regression, type Store } from '@speedpatrol/core';
-import { comparisonMarkdown, formatPct } from '@speedpatrol/stats';
+import { comparisonMarkdown, formatPct, formatValue } from '@speedpatrol/stats';
 
 const exec = promisify(execFile);
 
@@ -41,10 +41,49 @@ async function regressionBody(store: Store, regression: Regression): Promise<str
     .join('\n\n');
 }
 
-async function experimentBody(store: Store, experiment: Experiment): Promise<string> {
+/** Plain names for the probes' primary metrics, so a PR reads without the metric glossary. */
+const METRIC_NAMES: Record<string, string> = {
+  flow_ms: 'the whole flow',
+  launch_ms: 'app launch',
+  ready_ms: 'time to ready',
+  lcp_ms: 'largest contentful paint',
+  fcp_ms: 'first contentful paint',
+  ttfb_ms: 'time to first byte',
+  tbt_ms: 'total blocking time',
+  wall_ms: 'wall time',
+  total_ms: 'total time',
+  total_time_ms: 'total time',
+};
+
+function metricName(metric: string): string {
+  const name = METRIC_NAMES[metric];
+  return name ? `${name} (\`${metric}\`)` : `\`${metric}\``;
+}
+
+/** "11% faster": the size of the speed-up, without a sign to decode. */
+function faster(deltaPct: number | undefined): string {
+  return `${Math.abs((deltaPct ?? 0) * 100).toFixed(0)}% faster`;
+}
+
+export function experimentTitle(experiment: Experiment, scope: string): string {
+  const what = experiment.title ?? `speed up ${experiment.target.benchmark}`;
+  return `perf(${scope}): ${what} (${faster(experiment.deltaPct)})`;
+}
+
+async function experimentBody(store: Store, experiment: Experiment, benchmarkTitle?: string): Promise<string> {
   const comparison = experiment.comparisonId ? await store.getComparison(experiment.comparisonId) : undefined;
+  const target = comparison?.metrics.find(
+    (m) => m.benchmark === experiment.target.benchmark && m.metric === experiment.target.metric,
+  );
+  const name = benchmarkTitle
+    ? `${benchmarkTitle} (\`${experiment.target.benchmark}\`)`
+    : `\`${experiment.target.benchmark}\``;
+  const values =
+    target?.base && target.head
+      ? ` goes from ${formatValue(target.base.median, target.unit)} to ${formatValue(target.head.median, target.unit)} (median)`
+      : ` is ${formatPct(experiment.deltaPct ?? 0)}`;
   return [
-    `Makes \`${experiment.target.benchmark}\` **${formatPct(experiment.deltaPct ?? 0)}** (${experiment.target.metric}), measured A/B against ${experiment.baseSha.slice(0, 10)} on the same machine. No critical benchmark got slower.`,
+    `Makes ${name} **${faster(experiment.deltaPct)}**: ${metricName(experiment.target.metric)}${values}, measured A/B against ${experiment.baseSha.slice(0, 10)} on the same machine. No critical benchmark got slower.`,
     experiment.hypothesis ? `## Hypothesis\n\n${experiment.hypothesis}` : '',
     experiment.summary ? `## Change\n\n${experiment.summary}` : '',
     comparison ? `## Measurement\n\n${comparisonMarkdown(comparison, { all: false })}` : '',
@@ -103,8 +142,9 @@ export async function publish(
   for (const experiment of await store.listExperiments()) {
     if (experiment.status !== 'improved' || experiment.prUrl) continue;
     const scope = loaded.config.agents.optimizer.commitScope ?? experiment.target.benchmark;
-    const title = `perf(${scope}): ${formatPct(experiment.deltaPct ?? 0)} ${experiment.target.metric}`;
-    const body = (await experimentBody(store, experiment)) + FOOTER;
+    const title = experimentTitle(experiment, scope);
+    const benchmarkTitle = loaded.benchmarks.find((b) => b.id === experiment.target.benchmark)?.title;
+    const body = (await experimentBody(store, experiment, benchmarkTitle)) + FOOTER;
     if (dryRun) {
       options.log(`[dry run] PR from ${experiment.branch}: ${title}\n${body}\n`);
       continue;
