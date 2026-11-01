@@ -43,6 +43,15 @@ function targetDescription(benchmark: Benchmark, run: Run | undefined): string {
   return `# Target\n\n${JSON.stringify(benchmark, null, 2)}\n\n## Latest numbers\n${metrics}\n\n## Profile\n${profileDiffText(undefined, run, benchmark.id)}`;
 }
 
+/** The first line, cut to 60 characters at a word boundary: one subject for the commit and the PR. */
+export function subject(text: string): string {
+  const line = text.split('\n')[0]!.trim();
+  if (line.length <= 60) return line;
+  const cut = line.slice(0, 60);
+  const space = cut.lastIndexOf(' ');
+  return (space > 20 ? cut.slice(0, space) : cut).trimEnd();
+}
+
 export type OptimizerResult = { experiment: Experiment; comparison?: Comparison };
 
 /**
@@ -143,7 +152,7 @@ export async function runOptimizer(options: {
         ['title', 'summary'],
         async (input) => {
           const summary = str(input, 'summary');
-          await save({ title: str(input, 'title').split('\n')[0]!.trim().slice(0, 72), summary });
+          await save({ title: subject(str(input, 'title')), summary });
           return { text: summary, done: true, summary: 'Finished.' };
         },
       ),
@@ -183,7 +192,7 @@ export async function runOptimizer(options: {
       'commit',
       '-q',
       '-m',
-      `perf(${loaded.config.agents.optimizer.commitScope ?? benchmark.id}): ${(experiment.title ?? hypothesis ?? experiment.summary ?? 'speed up').split('\n')[0]!.slice(0, 60)}`,
+      `perf(${loaded.config.agents.optimizer.commitScope ?? benchmark.id}): ${subject(experiment.title ?? hypothesis ?? experiment.summary ?? 'speed up')}`,
       '-m',
       `${experiment.summary ?? ''}\n\nProposed by the Speedpatrol optimizer.`,
     ]);

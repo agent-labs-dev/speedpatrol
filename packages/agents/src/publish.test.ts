@@ -3,6 +3,7 @@ import { promisify } from 'node:util';
 import type { Experiment } from '@speedpatrol/core';
 import { describe, expect, it } from 'vitest';
 import { ensureLabels, experimentTitle } from './publish.js';
+import { subject } from './roles/optimizer.js';
 
 const exec = promisify(execFile);
 
@@ -56,5 +57,19 @@ describe('experimentTitle', () => {
     expect(experimentTitle(experiment, 'mobile.navigate')).toBe(
       'perf(mobile.navigate): speed up mobile.navigate (11% faster)',
     );
+  });
+});
+
+describe('subject', () => {
+  it('keeps a short title as it is', () => {
+    expect(subject('  Batch the order lookups\nmore text')).toBe('Batch the order lookups');
+  });
+
+  it('cuts a long title at a word boundary, within 60 characters', () => {
+    const long = 'Fetch the user from the entry before the router and load the syntax highlighter on first use';
+    const cut = subject(long);
+    expect(cut.length).toBeLessThanOrEqual(60);
+    expect(long.startsWith(cut)).toBe(true);
+    expect(long[cut.length]).toBe(' ');
   });
 });
