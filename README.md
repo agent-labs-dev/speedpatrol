@@ -15,7 +15,7 @@ Speedpatrol is a performance team made of agents. It measures the critical paths
 - **Statistics** decide each verdict. A second A/B measurement must confirm each regression.
 - The **analyst** agent explains each confirmed regression: the suspect commits, the code, and the CPU profile.
 - The **optimizer** agent (off by default) tries a speed-up in its own git worktree. An A/B run must prove it.
-- Speedpatrol **publishes** to GitHub: an issue for each regression, and a draft PR for each verified speed-up.
+- Speedpatrol **publishes** to GitHub: an issue for each regression, and a PR for each verified speed-up.
 
 ```bash
 npx speedpatrol
@@ -32,7 +32,7 @@ flowchart TB
   confirm -->|"confirmed"| analyst["4 · Explain<br/>LLM · Analyst reads commits, diffs, profiles"]
   cmp -->|"no regression"| opt
   analyst --> opt["5 · Speed up<br/>LLM · Optimizer edits a worktree, A/B verifies"]
-  opt --> publish["6 · Publish<br/>Issues for regressions, draft PRs for speed-ups"]
+  opt --> publish["6 · Publish<br/>Issues for regressions, PRs for speed-ups"]
   publish --> wait["Wait for a new commit on main"]
   wait -->|"next cycle"| pull
 
@@ -85,7 +85,7 @@ To set up by hand, read [Getting started](docs/getting-started.md).
 | --- | --- |
 | Platforms | HTTP APIs, web pages (Chromium), Electron apps, server startup, Android, iOS simulators, Maestro flows, builds and CLI commands, custom scripts |
 | Agent LLMs | Claude Code, Codex, OpenCode, or any agent CLI. API keys for OpenRouter, OpenAI, Anthropic, or a custom endpoint |
-| GitHub | An issue for each regression, a draft PR for each speed-up, and an Action that posts an A/B table on each PR |
+| GitHub | An issue for each regression, a PR for each speed-up, and an Action that posts an A/B table on each PR |
 | Output | A dashboard, a Markdown or JSON comparison table, plain JSON data in `.speedpatrol/runs/`, and CPU profiles |
 
 ## Documentation

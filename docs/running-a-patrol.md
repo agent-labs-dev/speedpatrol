@@ -93,7 +93,7 @@ git fetch --quiet origin main
 git checkout --quiet --detach origin/main
 speedpatrol --once --no-optimize   # measure, confirm, explain, publish issues
 speedpatrol optimize               # optional: one speed-up attempt and its A/B verification
-speedpatrol publish                # draft PRs for verified speed-ups
+speedpatrol publish                # PRs for verified speed-ups
 ```
 
 `--once --no-optimize` prints `HEAD is still <sha>, measured before: skipping the measurement.` when `main` did not move. That is normal. `--force` measures the same commit again.
@@ -152,7 +152,7 @@ When the analyst runs out of time before it writes its analysis, the regression 
 
 ```yaml
 agents:
-  github: { enabled: true, repo: my-org/my-app, pullRequests: draft }
+  github: { enabled: true, repo: my-org/my-app, pullRequests: ready }
 ```
 
 - Publishing uses the `gh` CLI, so `gh auth status` must pass for the user that runs the patrol. The token needs to create issues and labels, push branches, and open pull requests on `repo`.
