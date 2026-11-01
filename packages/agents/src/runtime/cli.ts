@@ -158,6 +158,13 @@ export class CliRuntime implements Runtime {
           error: parsed.error || stderr.trim().split('\n').slice(-20).join('\n') || `CLI exited ${code}`,
         };
       }
+      if (!finished && task.tools.some((tool) => tool.name === 'finish')) {
+        return {
+          ...base,
+          stop: 'error',
+          error: 'CLI exited without completing the finish tool. Check tool approvals and agent output.',
+        };
+      }
       return { ...base, stop: 'done' };
     } finally {
       await mcp.close();
