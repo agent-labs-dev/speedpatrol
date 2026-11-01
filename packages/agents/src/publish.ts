@@ -81,7 +81,16 @@ export function experimentTitle(experiment: Experiment, scope: string, unit?: Un
   return `perf(${scope}): ${what} (${gain(experiment.deltaPct, unit)})`;
 }
 
-function experimentBody(
+/** A secondary metric that got slower: the verification only guards the primary ones. */
+function tradeOff(metric: MetricComparison): string {
+  const values =
+    metric.base && metric.head
+      ? ` (${formatValue(metric.base.median, metric.unit)} to ${formatValue(metric.head.median, metric.unit)})`
+      : '';
+  return `- \`${metric.benchmark}\` ${metricName(metric.metric)}: **${formatPct(metric.deltaPct)}**${values}`;
+}
+
+export function experimentBody(
   experiment: Experiment,
   comparison: Comparison | undefined,
   target: MetricComparison | undefined,
@@ -94,8 +103,12 @@ function experimentBody(
     target?.base && target.head
       ? ` goes from ${formatValue(target.base.median, target.unit)} to ${formatValue(target.head.median, target.unit)} (median)`
       : ` is ${formatPct(experiment.deltaPct ?? 0)}`;
+  const tradeOffs = (comparison?.metrics ?? []).filter((m) => !m.primary && m.verdict === 'regression');
   return [
-    `Makes ${name} **${gain(experiment.deltaPct, target?.unit)}**: ${metricName(experiment.target.metric)}${values}, measured A/B against ${experiment.baseSha.slice(0, 10)} on the same machine. No critical benchmark got slower.`,
+    `Makes ${name} **${gain(experiment.deltaPct, target?.unit)}**: ${metricName(experiment.target.metric)}${values}, measured A/B against ${experiment.baseSha.slice(0, 10)} on the same machine. No critical benchmark got slower on its primary metric.`,
+    tradeOffs.length
+      ? `## Trade-offs\n\nThese secondary metrics got slower. Check that they are acceptable before you merge.\n\n${tradeOffs.map(tradeOff).join('\n')}`
+      : '',
     experiment.hypothesis ? `## Hypothesis\n\n${experiment.hypothesis}` : '',
     experiment.summary ? `## Change\n\n${experiment.summary}` : '',
     comparison ? `## Measurement\n\n${comparisonMarkdown(comparison, { all: false })}` : '',

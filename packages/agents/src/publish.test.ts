@@ -1,8 +1,8 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import type { Experiment } from '@speedpatrol/core';
+import type { Comparison, Experiment, MetricComparison } from '@speedpatrol/core';
 import { describe, expect, it } from 'vitest';
-import { ensureLabels, experimentTitle } from './publish.js';
+import { ensureLabels, experimentBody, experimentTitle } from './publish.js';
 import { subject } from './roles/optimizer.js';
 
 const exec = promisify(execFile);
@@ -83,5 +83,51 @@ describe('subject', () => {
     expect(cut.length).toBeLessThanOrEqual(60);
     expect(long.startsWith(cut)).toBe(true);
     expect(long[cut.length]).toBe(' ');
+  });
+});
+
+describe('experimentBody', () => {
+  const experiment = {
+    target: { benchmark: 'mobile.navigate', metric: 'flow_ms' },
+    deltaPct: -0.114,
+    baseSha: '0cee930aa2b1',
+  } as Experiment;
+  const metric = (name: string, primary: boolean, base: number, head: number, verdict: string) =>
+    ({
+      benchmark: 'mobile.navigate',
+      metric: name,
+      unit: 'ms',
+      primary,
+      base: { median: base },
+      head: { median: head },
+      deltaPct: head / base - 1,
+      ci: [0, 0],
+      pValue: 0,
+      verdict,
+    }) as MetricComparison;
+  const compare = (metrics: MetricComparison[]) =>
+    ({
+      verdict: 'improvement',
+      base: { label: 'base', sha: '0cee930aa2b1', runs: [] },
+      head: { label: 'head', sha: '5f21766d0000', runs: [] },
+      metrics,
+      warnings: [],
+    }) as unknown as Comparison;
+  const tradeOffs = (body: string) => body.split('## Trade-offs')[1]?.split('\n## ')[0];
+  const target = metric('flow_ms', true, 2000, 1772, 'improvement');
+
+  it('lists each secondary metric that got slower', () => {
+    const comparison = compare([
+      target,
+      metric('tbt_ms', false, 57.5, 123.5, 'regression'),
+      metric('fcp_ms', false, 1010, 804, 'improvement'),
+    ]);
+    const section = tradeOffs(experimentBody(experiment, comparison, target));
+    expect(section).toContain('`mobile.navigate` total blocking time (`tbt_ms`): **+114.8%** (57.5 ms to 123.5 ms)');
+    expect(section).not.toContain('fcp_ms');
+  });
+
+  it('has no trade-offs section when no secondary metric got slower', () => {
+    expect(tradeOffs(experimentBody(experiment, compare([target]), target))).toBeUndefined();
   });
 });
