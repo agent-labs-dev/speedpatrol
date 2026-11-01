@@ -301,7 +301,7 @@ export const agentsSchema = z
       .object({
         enabled: z.boolean().default(false),
         repo: z.string().optional(),
-        pullRequests: z.enum(['draft', 'ready']).default('draft'),
+        pullRequests: z.enum(['draft', 'ready']).default('ready'),
         labels: z.array(z.string()).default(['speedpatrol']),
       })
       .default({}),
