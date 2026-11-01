@@ -1,7 +1,16 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { type Experiment, git, type LoadedConfig, type Regression, type Store } from '@speedpatrol/core';
-import { comparisonMarkdown, formatPct } from '@speedpatrol/stats';
+import {
+  type Comparison,
+  type Experiment,
+  git,
+  type LoadedConfig,
+  type MetricComparison,
+  type Regression,
+  type Store,
+  type Unit,
+} from '@speedpatrol/core';
+import { comparisonMarkdown, formatPct, formatValue } from '@speedpatrol/stats';
 
 const exec = promisify(execFile);
 
@@ -41,10 +50,52 @@ async function regressionBody(store: Store, regression: Regression): Promise<str
     .join('\n\n');
 }
 
-async function experimentBody(store: Store, experiment: Experiment): Promise<string> {
-  const comparison = experiment.comparisonId ? await store.getComparison(experiment.comparisonId) : undefined;
+/** Plain names for the probes' primary metrics, so a PR reads without the metric glossary. */
+const METRIC_NAMES: Record<string, string> = {
+  flow_ms: 'the whole flow',
+  launch_ms: 'app launch',
+  ready_ms: 'time to ready',
+  lcp_ms: 'largest contentful paint',
+  fcp_ms: 'first contentful paint',
+  ttfb_ms: 'time to first byte',
+  tbt_ms: 'total blocking time',
+  wall_ms: 'wall time',
+  total_ms: 'total time',
+  total_time_ms: 'total time',
+};
+
+function metricName(metric: string): string {
+  const name = METRIC_NAMES[metric];
+  return name ? `${name} (\`${metric}\`)` : `\`${metric}\``;
+}
+
+const SIZES: Unit[] = ['bytes', 'kb', 'mb'];
+
+/** "11% faster", or "11% smaller" for a size: the gain, without a sign to decode. */
+function gain(deltaPct: number | undefined, unit: Unit | undefined): string {
+  return `${Math.abs((deltaPct ?? 0) * 100).toFixed(0)}% ${unit && SIZES.includes(unit) ? 'smaller' : 'faster'}`;
+}
+
+export function experimentTitle(experiment: Experiment, scope: string, unit?: Unit): string {
+  const what = experiment.title ?? `speed up ${experiment.target.benchmark}`;
+  return `perf(${scope}): ${what} (${gain(experiment.deltaPct, unit)})`;
+}
+
+function experimentBody(
+  experiment: Experiment,
+  comparison: Comparison | undefined,
+  target: MetricComparison | undefined,
+  benchmarkTitle?: string,
+): string {
+  const name = benchmarkTitle
+    ? `${benchmarkTitle} (\`${experiment.target.benchmark}\`)`
+    : `\`${experiment.target.benchmark}\``;
+  const values =
+    target?.base && target.head
+      ? ` goes from ${formatValue(target.base.median, target.unit)} to ${formatValue(target.head.median, target.unit)} (median)`
+      : ` is ${formatPct(experiment.deltaPct ?? 0)}`;
   return [
-    `Makes \`${experiment.target.benchmark}\` **${formatPct(experiment.deltaPct ?? 0)}** (${experiment.target.metric}), measured A/B against ${experiment.baseSha.slice(0, 10)} on the same machine. No critical benchmark got slower.`,
+    `Makes ${name} **${gain(experiment.deltaPct, target?.unit)}**: ${metricName(experiment.target.metric)}${values}, measured A/B against ${experiment.baseSha.slice(0, 10)} on the same machine. No critical benchmark got slower.`,
     experiment.hypothesis ? `## Hypothesis\n\n${experiment.hypothesis}` : '',
     experiment.summary ? `## Change\n\n${experiment.summary}` : '',
     comparison ? `## Measurement\n\n${comparisonMarkdown(comparison, { all: false })}` : '',
@@ -103,8 +154,13 @@ export async function publish(
   for (const experiment of await store.listExperiments()) {
     if (experiment.status !== 'improved' || experiment.prUrl) continue;
     const scope = loaded.config.agents.optimizer.commitScope ?? experiment.target.benchmark;
-    const title = `perf(${scope}): ${formatPct(experiment.deltaPct ?? 0)} ${experiment.target.metric}`;
-    const body = (await experimentBody(store, experiment)) + FOOTER;
+    const comparison = experiment.comparisonId ? await store.getComparison(experiment.comparisonId) : undefined;
+    const target = comparison?.metrics.find(
+      (m) => m.benchmark === experiment.target.benchmark && m.metric === experiment.target.metric,
+    );
+    const title = experimentTitle(experiment, scope, target?.unit);
+    const benchmarkTitle = loaded.benchmarks.find((b) => b.id === experiment.target.benchmark)?.title;
+    const body = experimentBody(experiment, comparison, target, benchmarkTitle) + FOOTER;
     if (dryRun) {
       options.log(`[dry run] PR from ${experiment.branch}: ${title}\n${body}\n`);
       continue;

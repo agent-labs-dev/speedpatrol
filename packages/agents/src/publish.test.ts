@@ -1,7 +1,9 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
+import type { Experiment } from '@speedpatrol/core';
 import { describe, expect, it } from 'vitest';
-import { ensureLabels } from './publish.js';
+import { ensureLabels, experimentTitle } from './publish.js';
+import { subject } from './roles/optimizer.js';
 
 const exec = promisify(execFile);
 
@@ -36,5 +38,50 @@ describe('ensureLabels', () => {
   it('surfaces any other failure', async () => {
     const gh = fakeGh('HTTP 403: Resource not accessible by integration\n');
     await expect(ensureLabels(gh.run, ['speedpatrol'])).rejects.toThrow(/403/);
+  });
+});
+
+describe('experimentTitle', () => {
+  const experiment = {
+    target: { benchmark: 'mobile.navigate', metric: 'flow_ms' },
+    deltaPct: -0.114,
+  } as Experiment;
+
+  it('names the change and the speed-up, not the metric', () => {
+    expect(experimentTitle({ ...experiment, title: 'fetch the user before the router loads' }, 'mobile')).toBe(
+      'perf(mobile): fetch the user before the router loads (11% faster)',
+    );
+  });
+
+  it('says smaller when the metric is a size', () => {
+    expect(experimentTitle({ ...experiment, title: 'drop the unused locale data' }, 'web', 'kb')).toBe(
+      'perf(web): drop the unused locale data (11% smaller)',
+    );
+  });
+
+  it('falls back to the benchmark when the optimizer gave no title', () => {
+    expect(experimentTitle(experiment, 'mobile.navigate')).toBe(
+      'perf(mobile.navigate): speed up mobile.navigate (11% faster)',
+    );
+  });
+});
+
+describe('subject', () => {
+  it('keeps a short title as it is', () => {
+    expect(subject('  batch the order lookups\nmore text')).toBe('batch the order lookups');
+  });
+
+  it('lowers a capital first word, but not an identifier', () => {
+    expect(subject('Batch the order lookups')).toBe('batch the order lookups');
+    expect(subject('HTTP responses stream')).toBe('HTTP responses stream');
+    expect(subject('MyCache skips the disk')).toBe('MyCache skips the disk');
+  });
+
+  it('cuts a long title at a word boundary, within 60 characters', () => {
+    const long = 'fetch the user from the entry before the router and load the syntax highlighter on first use';
+    const cut = subject(long);
+    expect(cut.length).toBeLessThanOrEqual(60);
+    expect(long.startsWith(cut)).toBe(true);
+    expect(long[cut.length]).toBe(' ');
   });
 });

@@ -16,7 +16,7 @@ import { runRole } from '../session.js';
 import { readInstructions } from '../tools/benchmarks.js';
 import { profileDiffText } from '../tools/measure.js';
 import { repoTools } from '../tools/repo.js';
-import { finishTool, optionalStr, tool } from '../tools/schema.js';
+import { optionalStr, str, tool } from '../tools/schema.js';
 
 const SYSTEM = `You are the optimizer of Speedpatrol, a team of agents that keeps an app fast.
 You work in your own git worktree (the current directory), on a branch made for you. Your job: make one benchmark faster without making anything else slower, with a change a reviewer would merge.
@@ -26,7 +26,7 @@ How to work:
 2. Form one hypothesis (e.g. "loadOrders queries once per row; batch it"). Prefer algorithmic and I/O fixes (N+1 queries, repeated work, missing caching or memoization, oversized payloads, blocking calls, needless re-renders) over micro-tuning.
 3. Edit the code. Keep behaviour identical, keep the change small, follow the repo's style, and run the repo's own tests for the code you touched.
 4. Call measure_change to A/B your worktree against the base. Iterate while it helps.
-5. Call finish with the hypothesis and what changed. Do not commit, push or open a PR: Speedpatrol verifies and publishes.
+5. Call finish with a title and what changed. The title says what the code change does, for a reviewer who does not know the benchmark. Do not commit, push or open a PR: Speedpatrol verifies and publishes.
 
 Only the measurement decides whether the change is kept: an improvement smaller than the threshold, or any regression elsewhere, discards it.`;
 
@@ -41,6 +41,22 @@ function targetDescription(benchmark: Benchmark, run: Run | undefined): string {
         .join('\n')
     : 'not measured yet';
   return `# Target\n\n${JSON.stringify(benchmark, null, 2)}\n\n## Latest numbers\n${metrics}\n\n## Profile\n${profileDiffText(undefined, run, benchmark.id)}`;
+}
+
+/**
+ * The first line, cut to 60 characters at a word boundary: one subject for the
+ * commit and the PR. A capital first word is lowered, as commitlint's
+ * subject-case wants; an identifier such as `HTTP` or `MyCache` is kept.
+ */
+export function subject(text: string): string {
+  const line = text
+    .split('\n')[0]!
+    .trim()
+    .replace(/^[A-Z][a-z]*\b/, (word) => word.toLowerCase());
+  if (line.length <= 60) return line;
+  const cut = line.slice(0, 60);
+  const space = cut.lastIndexOf(' ');
+  return (space > 20 ? cut.slice(0, space) : cut).trimEnd();
 }
 
 export type OptimizerResult = { experiment: Experiment; comparison?: Comparison };
@@ -129,7 +145,24 @@ export async function runOptimizer(options: {
         },
       ),
       ...repoTools(worktree),
-      finishTool('Finish with the hypothesis and the change.', async (summary) => save({ summary })),
+      tool(
+        'finish',
+        'Finish with a title and the change.',
+        {
+          title: {
+            type: 'string',
+            description:
+              'What the code change does, in the imperative and under 60 characters, e.g. "batch the order lookups in loadOrders". No metric names or numbers: Speedpatrol adds the measured speed-up.',
+          },
+          summary: { type: 'string', description: 'What you changed and why it is faster, for the reviewer.' },
+        },
+        ['title', 'summary'],
+        async (input) => {
+          const summary = str(input, 'summary');
+          await save({ title: subject(str(input, 'title')), summary });
+          return { text: summary, done: true, summary: 'Finished.' };
+        },
+      ),
     ];
     const outcome = await runRole({
       role: 'optimizer',
@@ -166,7 +199,7 @@ export async function runOptimizer(options: {
       'commit',
       '-q',
       '-m',
-      `perf(${loaded.config.agents.optimizer.commitScope ?? benchmark.id}): ${(hypothesis ?? experiment.summary ?? 'speed up').split('\n')[0]!.slice(0, 60)}`,
+      `perf(${loaded.config.agents.optimizer.commitScope ?? benchmark.id}): ${subject(experiment.title ?? hypothesis ?? experiment.summary ?? 'speed up')}`,
       '-m',
       `${experiment.summary ?? ''}\n\nProposed by the Speedpatrol optimizer.`,
     ]);

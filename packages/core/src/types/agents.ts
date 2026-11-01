@@ -77,6 +77,8 @@ export type Experiment = {
   worktree: string;
   baseSha: string;
   headSha?: string;
+  /** What the change does, in a reviewer's words. The commit subject and the PR title. */
+  title?: string;
   hypothesis?: string;
   summary?: string;
   comparisonId?: string;
