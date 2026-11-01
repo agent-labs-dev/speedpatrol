@@ -43,9 +43,16 @@ function targetDescription(benchmark: Benchmark, run: Run | undefined): string {
   return `# Target\n\n${JSON.stringify(benchmark, null, 2)}\n\n## Latest numbers\n${metrics}\n\n## Profile\n${profileDiffText(undefined, run, benchmark.id)}`;
 }
 
-/** The first line, cut to 60 characters at a word boundary: one subject for the commit and the PR. */
+/**
+ * The first line, cut to 60 characters at a word boundary: one subject for the
+ * commit and the PR. A capital first word is lowered, as commitlint's
+ * subject-case wants; an identifier such as `HTTP` or `MyCache` is kept.
+ */
 export function subject(text: string): string {
-  const line = text.split('\n')[0]!.trim();
+  const line = text
+    .split('\n')[0]!
+    .trim()
+    .replace(/^[A-Z][a-z]*\b/, (word) => word.toLowerCase());
   if (line.length <= 60) return line;
   const cut = line.slice(0, 60);
   const space = cut.lastIndexOf(' ');
@@ -145,7 +152,7 @@ export async function runOptimizer(options: {
           title: {
             type: 'string',
             description:
-              'What the code change does, in the imperative and under 60 characters, e.g. "Batch the order lookups in loadOrders". No metric names or numbers: Speedpatrol adds the measured speed-up.',
+              'What the code change does, in the imperative and under 60 characters, e.g. "batch the order lookups in loadOrders". No metric names or numbers: Speedpatrol adds the measured speed-up.',
           },
           summary: { type: 'string', description: 'What you changed and why it is faster, for the reviewer.' },
         },

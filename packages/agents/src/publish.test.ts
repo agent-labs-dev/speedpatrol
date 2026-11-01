@@ -48,8 +48,8 @@ describe('experimentTitle', () => {
   } as Experiment;
 
   it('names the change and the speed-up, not the metric', () => {
-    expect(experimentTitle({ ...experiment, title: 'Fetch the user before the router loads' }, 'mobile')).toBe(
-      'perf(mobile): Fetch the user before the router loads (11% faster)',
+    expect(experimentTitle({ ...experiment, title: 'fetch the user before the router loads' }, 'mobile')).toBe(
+      'perf(mobile): fetch the user before the router loads (11% faster)',
     );
   });
 
@@ -62,11 +62,17 @@ describe('experimentTitle', () => {
 
 describe('subject', () => {
   it('keeps a short title as it is', () => {
-    expect(subject('  Batch the order lookups\nmore text')).toBe('Batch the order lookups');
+    expect(subject('  batch the order lookups\nmore text')).toBe('batch the order lookups');
+  });
+
+  it('lowers a capital first word, but not an identifier', () => {
+    expect(subject('Batch the order lookups')).toBe('batch the order lookups');
+    expect(subject('HTTP responses stream')).toBe('HTTP responses stream');
+    expect(subject('MyCache skips the disk')).toBe('MyCache skips the disk');
   });
 
   it('cuts a long title at a word boundary, within 60 characters', () => {
-    const long = 'Fetch the user from the entry before the router and load the syntax highlighter on first use';
+    const long = 'fetch the user from the entry before the router and load the syntax highlighter on first use';
     const cut = subject(long);
     expect(cut.length).toBeLessThanOrEqual(60);
     expect(long.startsWith(cut)).toBe(true);

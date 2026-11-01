@@ -154,7 +154,7 @@ describe('agents over MCP', () => {
     expect(real.experiment.status, real.experiment.reason).toBe('improved');
     expect(real.experiment.deltaPct).toBeLessThan(-0.05);
     expect(gitIn(real.experiment.worktree, 'log', '-1', '--format=%s')).toBe(
-      'perf(api.items): Restore the work rounds to 20000',
+      'perf(api.items): restore the work rounds to 20000',
     );
   });
 });
