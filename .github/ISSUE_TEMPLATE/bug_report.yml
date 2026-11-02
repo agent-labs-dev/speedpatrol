@@ -1,0 +1,36 @@
+name: Bug report
+description: Speedpatrol did something wrong, or failed to measure.
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you ran, what you expected, and what you got. Paste the error.
+    validations:
+      required: true
+  - type: textarea
+    id: doctor
+    attributes:
+      label: Output of `npx speedpatrol doctor`
+      render: text
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Speedpatrol version
+      description: "`npx speedpatrol --version`, or the commit if you built from source."
+    validations:
+      required: true
+  - type: textarea
+    id: config
+    attributes:
+      label: The benchmark or config involved
+      description: The relevant part of `.speedpatrol/speedpatrol.yml` or `benchmarks.json`. Remove secrets, tokens and private hosts.
+      render: yaml
+  - type: input
+    id: platform
+    attributes:
+      label: OS and machine
+      description: For example "Ubuntu 24.04, 8 vCPU VM, Xvfb" or "macOS 15, M3".

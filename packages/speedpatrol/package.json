@@ -1,0 +1,39 @@
+{
+  "name": "speedpatrol",
+  "version": "0.1.0",
+  "description": "A team of AI agents that measures your app's critical paths on every commit, catches regressions, and proposes speed-ups.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "bin": {
+    "speedpatrol": "./dist/bin.js"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "files": [
+    "dist",
+    "src/ui",
+    "LICENSE",
+    "NOTICE"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/agent-labs-dev/speedpatrol.git"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "node build.mjs"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.20.0",
+    "playwright": "1.64.1",
+    "yaml": "^2.5.1",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@speedpatrol/cli": "workspace:*",
+    "esbuild": "^0.28.2"
+  }
+}

@@ -1,0 +1,15 @@
+{
+  "$schema": "https://unpkg.com/knip@6/schema.json",
+  "workspaces": {
+    "packages/agents": {
+      "entry": ["src/testing/fake-agent.mjs"]
+    },
+    "packages/dashboard": {
+      "entry": ["src/ui/app.js", "scripts/*.mjs"]
+    },
+    "packages/speedpatrol": {
+      "entry": ["build.mjs"],
+      "ignoreDependencies": ["@speedpatrol/cli", "@modelcontextprotocol/sdk", "playwright", "yaml", "zod"]
+    }
+  }
+}
