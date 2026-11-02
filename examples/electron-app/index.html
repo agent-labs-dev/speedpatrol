@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'" />
+    <title>Example app</title>
+  </head>
+  <body>
+    <nav>
+      <button id="nav-home" type="button">Home</button>
+      <button id="nav-items" type="button">Items</button>
+    </nav>
+    <main id="home" data-screen="home">
+      <h1>Home</h1>
+    </main>
+    <main id="items" data-screen="items" hidden></main>
+    <script src="renderer.js"></script>
+  </body>
+</html>
