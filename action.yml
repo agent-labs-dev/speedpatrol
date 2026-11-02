@@ -1,0 +1,129 @@
+name: Speedpatrol compare
+description: A/B measure a pull request against its base branch on this runner, and post the table of regressions and improvements.
+author: agent-labs-dev
+branding:
+  icon: zap
+  color: green
+
+inputs:
+  base:
+    description: The ref to compare against. Default is origin/<the pull request's base branch>.
+    default: ''
+  benchmarks:
+    description: Benchmark ids or tags, separated by spaces. Default is all.
+    default: ''
+  rounds:
+    description: A/B rounds. Default is defaults.rounds in the config.
+    default: ''
+  iterations:
+    description: Iterations per round. Default is the config.
+    default: ''
+  fail-on-regression:
+    description: Fail the job when a primary metric regressed.
+    default: 'false'
+  comment:
+    description: Post the table on the pull request, and update it on each push.
+    default: 'true'
+  github-token:
+    description: 'The token for gh. It needs `pull-requests: write` to comment.'
+    default: ${{ github.token }}
+  package:
+    description: What npm installs. A version (`speedpatrol@0.1.0`), a tag, or the path of a tarball.
+    default: speedpatrol@latest
+  node-version:
+    description: The Node.js version that runs Speedpatrol.
+    default: '22'
+  working-directory:
+    description: The folder that holds `.speedpatrol/`, or a folder below it.
+    default: .
+
+outputs:
+  verdict:
+    description: regression, improvement, unchanged, noisy or missing.
+    value: ${{ steps.compare.outputs.verdict }}
+
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+      with:
+        node-version: ${{ inputs.node-version }}
+
+    - name: Install Speedpatrol
+      shell: bash
+      env:
+        PACKAGE: ${{ inputs.package }}
+      run: |
+        prefix="$RUNNER_TEMP/speedpatrol"
+        npm install --prefix "$prefix" --no-audit --no-fund --loglevel=error "$PACKAGE"
+        echo "SPEEDPATROL_BIN=$prefix/node_modules/.bin/speedpatrol" >> "$GITHUB_ENV"
+        echo "SPEEDPATROL_PREFIX=$prefix" >> "$GITHUB_ENV"
+
+    # Only web and Electron benchmarks need a browser.
+    - name: Install Chromium when a benchmark needs it
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: |
+        if ! grep -rqsE 'kind:\s*(web|electron)|"kind":\s*"(web|electron)"' .speedpatrol/speedpatrol.yml .speedpatrol/benchmarks.json; then
+          echo "No web or Electron benchmark: no browser to install."
+          exit 0
+        fi
+        playwright="$SPEEDPATROL_PREFIX/node_modules/.bin/playwright"
+        if [ "$RUNNER_OS" = Linux ] && { [ "$(id -u)" = 0 ] || sudo -n true 2>/dev/null; }; then
+          "$playwright" install --with-deps chromium
+        else
+          "$playwright" install chromium
+        fi
+
+    - name: Compare
+      id: compare
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        BASE: ${{ inputs.base }}
+        BASE_REF: ${{ github.base_ref }}
+        BENCHMARKS: ${{ inputs.benchmarks }}
+        ROUNDS: ${{ inputs.rounds }}
+        ITERATIONS: ${{ inputs.iterations }}
+      run: |
+        if [ "$(git rev-parse --is-shallow-repository)" = true ]; then
+          git fetch --quiet --unshallow origin
+        fi
+        base="${BASE:-origin/${BASE_REF:-main}}"
+        git fetch --quiet origin "${base#origin/}" || true
+        set -- compare --base "$base" --markdown "$RUNNER_TEMP/speedpatrol.md" --json
+        [ -n "$ROUNDS" ] && set -- "$@" --rounds "$ROUNDS"
+        [ -n "$ITERATIONS" ] && set -- "$@" --iterations "$ITERATIONS"
+        # shellcheck disable=SC2086 # benchmark ids split on spaces on purpose
+        set -- "$@" $BENCHMARKS
+        set +e
+        "$SPEEDPATROL_BIN" "$@" > "$RUNNER_TEMP/speedpatrol.json"
+        code=$?
+        set -e
+        if [ "$code" -ne 0 ] && [ "$code" -ne 1 ]; then exit "$code"; fi
+        verdict=$(node -p "require('$RUNNER_TEMP/speedpatrol.json').verdict")
+        echo "verdict=$verdict" >> "$GITHUB_OUTPUT"
+        cat "$RUNNER_TEMP/speedpatrol.md" >> "$GITHUB_STEP_SUMMARY"
+
+    - name: Comment on the pull request
+      if: inputs.comment == 'true' && github.event.pull_request.number
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.github-token }}
+        PR: ${{ github.event.pull_request.number }}
+      run: |
+        marker='<!-- speedpatrol -->'
+        { echo "$marker"; echo '### Speedpatrol'; echo; cat "$RUNNER_TEMP/speedpatrol.md"; } > "$RUNNER_TEMP/comment.md"
+        existing=$(gh api "repos/$GITHUB_REPOSITORY/issues/$PR/comments" --paginate --jq ".[] | select(.body | startswith(\"$marker\")) | .id" | head -n 1)
+        if [ -n "$existing" ]; then
+          gh api -X PATCH "repos/$GITHUB_REPOSITORY/issues/comments/$existing" -F "body=@$RUNNER_TEMP/comment.md" > /dev/null
+        else
+          gh pr comment "$PR" --body-file "$RUNNER_TEMP/comment.md"
+        fi
+
+    - name: Fail on a regression
+      if: inputs.fail-on-regression == 'true' && steps.compare.outputs.verdict == 'regression'
+      shell: bash
+      run: |
+        echo "::error::Speedpatrol found a regression on a primary metric."
+        exit 1
