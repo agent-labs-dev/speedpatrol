@@ -59,6 +59,13 @@ describe('agents over MCP', () => {
     delete process.env.FAKE_AGENT_SCRIPT;
   });
 
+  it('fails a CLI session that exits cleanly without finishing', async () => {
+    script([]);
+    const loaded = await loadConfig(repo);
+    const outcome = await runScout({ loaded, store: new Store(loaded.dir), log: say });
+    expect(outcome).toMatchObject({ stop: 'error', finished: false });
+  });
+
   it('the scout saves a benchmark only after trying it', async () => {
     const benchmark = { id: 'api.settings', kind: 'http', request: { url: 'http://127.0.0.1:${PORT}/settings' } };
     script([

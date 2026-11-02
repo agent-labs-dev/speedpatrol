@@ -19,9 +19,10 @@ const PRESETS: Record<CliAgent, { tools: string; editor: string }> = {
     editor: 'claude -p --output-format json --permission-mode auto --mcp-config {mcp} --allowedTools mcp__speedpatrol',
   },
   codex: {
-    tools: 'codex exec --json --skip-git-repo-check --sandbox read-only -c mcp_servers.speedpatrol.url={mcpUrl} -',
+    tools:
+      'codex exec --json --skip-git-repo-check --sandbox read-only -c mcp_servers.speedpatrol.url={mcpUrl} -c mcp_servers.speedpatrol.default_tools_approval_mode=approve -',
     editor:
-      'codex exec --json --skip-git-repo-check --sandbox workspace-write -c mcp_servers.speedpatrol.url={mcpUrl} -',
+      'codex exec --json --skip-git-repo-check --sandbox workspace-write -c mcp_servers.speedpatrol.url={mcpUrl} -c mcp_servers.speedpatrol.default_tools_approval_mode=approve -',
   },
   opencode: {
     tools: `OPENCODE_CONFIG_CONTENT='{"mcp":{"speedpatrol":{"type":"remote","url":"'{mcpUrl}'","oauth":false}},"permission":{"edit":"deny","bash":"deny"}}' opencode run --format json`,

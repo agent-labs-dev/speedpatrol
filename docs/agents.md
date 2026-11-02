@@ -39,7 +39,7 @@ The tools are the contract (ADR 0003). A CLI agent gets them over a local MCP se
 | `use:` | Scout and analyst | Optimizer |
 | --- | --- | --- |
 | `claude` | `claude -p --output-format json --tools 'Read,Grep,Glob' --mcp-config {mcp} --strict-mcp-config --allowedTools 'mcp__speedpatrol,Read,Grep,Glob'` | `claude -p --output-format json --permission-mode auto --mcp-config {mcp} --allowedTools mcp__speedpatrol` |
-| `codex` | `codex exec --json --skip-git-repo-check --sandbox read-only -c mcp_servers.speedpatrol.url={mcpUrl} -` | the same with `--sandbox workspace-write` |
+| `codex` | `codex exec --json --skip-git-repo-check --sandbox read-only -c mcp_servers.speedpatrol.url={mcpUrl} -c mcp_servers.speedpatrol.default_tools_approval_mode=approve -` | the same with `--sandbox workspace-write` |
 | `opencode` | `opencode run --format json`, with the MCP server and edits denied in `OPENCODE_CONFIG_CONTENT` | the same, edits allowed |
 
 The prompt goes to the command's stdin and to the file `{prompt}`. A preset is only a default: `{ runtime: cli, command: "..." }` runs anything.
