@@ -58,8 +58,15 @@ export async function runRole(run: RoleRun): Promise<RoleOutcome & { sessionId: 
   } catch (error) {
     outcome = { stop: 'error', steps: 0, costUsd: 0, finished: false, error: (error as Error).message };
   }
+  if (outcome.stop === 'done' && !outcome.finished) {
+    outcome = { ...outcome, stop: 'error', error: 'The agent stopped without completing the finish tool.' };
+  }
+  const failed = outcome.stop !== 'done';
+  if (failed && !outcome.error) {
+    outcome = { ...outcome, error: `${run.role} stopped (${outcome.stop}) before completing the role.` };
+  }
   record({
-    kind: outcome.stop === 'error' ? 'error' : 'finish',
+    kind: failed ? 'error' : 'finish',
     summary: outcome.error
       ? `Stopped: ${outcome.error}`
       : `Finished (${outcome.stop}): ${outcome.summary ?? ''}`.slice(0, 500),
@@ -68,7 +75,7 @@ export async function runRole(run: RoleRun): Promise<RoleOutcome & { sessionId: 
   await Promise.all(writes);
   await run.store.setStatus({
     role: run.role,
-    state: outcome.stop === 'error' ? 'failed' : 'done',
+    state: failed ? 'failed' : 'done',
     detail: (outcome.error ?? outcome.summary ?? outcome.stop).split('\n')[0]!.slice(0, 200),
     sessionId,
   });

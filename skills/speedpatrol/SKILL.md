@@ -85,7 +85,10 @@ When you change code for performance, verify with `compare` before claiming a sp
 - A comparison row: verdict, base and head median, change, 95% interval, p. Only `regression` and `improvement` are findings.
 - `.speedpatrol/runs/regressions/*.json`: confirmed regressions with the analyst's explanation and suspects.
 - `.speedpatrol/runs/experiments/*.json`: optimizer attempts; `improved` ones have a branch ready for a PR.
+- A timed-out, budget-exhausted, or incomplete agent session is a failure, not a benchmark verdict. `scout`, `analyze`, `optimize`, and a failed `--once` cycle exit 4; completed measurements remain saved. A failed optimizer session is never committed or verified. Completed attempts with no proven speed-up are normal rejections (exit 0).
 - `.speedpatrol/runs/profiles/<run>/<benchmark>.cpuprofile`: open in Chrome DevTools or speedscope; the hotspots are in the run JSON.
+
+Use `use: codex` to inherit the MCP tool timeout from the role's `timeoutMinutes`. A custom Codex command must include `-c mcp_servers.speedpatrol.tool_timeout_sec={timeoutSeconds}`. Size the session limit for edits, tests, and all A/B calls; shutdown drains an in-flight measurement before cleanup.
 
 ## 5. CI
 

@@ -1,5 +1,7 @@
-import { execFileSync } from 'node:child_process';
-import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { execFileSync, spawnSync } from 'node:child_process';
+import { once } from 'node:events';
+import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { loadConfig, Store } from '@speedpatrol/core';
@@ -35,7 +37,12 @@ describe('agents over MCP', () => {
     process.env.FAKE_AGENT_SCRIPT = JSON.stringify(steps);
   };
 
-  beforeAll(() => {
+  beforeAll(async () => {
+    const socket = createServer().listen(0, '127.0.0.1');
+    await once(socket, 'listening');
+    const address = socket.address();
+    if (!address || typeof address === 'string') throw new Error('Fixture did not get a TCP port');
+    await new Promise<void>((done) => socket.close(() => done()));
     repo = mkdtempSync(join(tmpdir(), 'speedpatrol-agents-'));
     cpSync(fixture, repo, { recursive: true, filter: (path) => !path.includes('/.speedpatrol/runs') });
     writeFileSync(join(repo, '.gitignore'), '.speedpatrol/runs/\n');
@@ -48,7 +55,7 @@ describe('agents over MCP', () => {
       // Only the fast benchmarks: this test is about the agents, not the probes.
       .replace(/ {2}- id: web\.home[\s\S]*?(?= {2}- id: startup)/, '')
       .replace(/ {2}- id: startup\.server[\s\S]*?(?= {2}- id: cli)/, '')
-      .replace('PORT: "4390"', 'PORT: "4490"');
+      .replace('PORT: "4390"', `PORT: "${address.port}"`);
     writeFileSync(configFile, config);
     gitIn(repo, 'init', '-q', '-b', 'main');
     gitIn(repo, 'add', '-A');
@@ -64,6 +71,22 @@ describe('agents over MCP', () => {
     const loaded = await loadConfig(repo);
     const outcome = await runScout({ loaded, store: new Store(loaded.dir), log: say });
     expect(outcome).toMatchObject({ stop: 'error', finished: false });
+  });
+
+  it('records a timed-out session as failed, with an error event', async () => {
+    const loaded = await loadConfig(repo);
+    loaded.config.agents.scout.use = {
+      runtime: 'cli',
+      agent: undefined,
+      command: 'node -e "setTimeout(() => {}, 60000)"',
+    };
+    loaded.config.agents.scout.timeoutMinutes = 0.005;
+    const store = new Store(loaded.dir);
+    const outcome = await runScout({ loaded, store, log: say });
+    expect(outcome).toMatchObject({ stop: 'timeout', finished: false });
+    const statuses = JSON.parse(readFileSync(store.path('agents.json'), 'utf8'));
+    expect(statuses.scout.state).toBe('failed');
+    expect((await store.events(outcome.sessionId)).at(-1)?.kind).toBe('error');
   });
 
   it('the scout saves a benchmark only after trying it', async () => {
@@ -163,5 +186,38 @@ describe('agents over MCP', () => {
     expect(gitIn(real.experiment.worktree, 'log', '-1', '--format=%s')).toBe(
       'perf(api.items): restore the work rounds to 20000',
     );
+  });
+
+  it.each(['optimize', '--once'])('exits 4 when %s cannot complete the optimizer session', async (command) => {
+    const dir = mkdtempSync(join(tmpdir(), 'speedpatrol-cli-timeout-'));
+    const configDir = join(dir, '.speedpatrol');
+    mkdirSync(configDir);
+    writeFileSync(
+      join(configDir, 'speedpatrol.yml'),
+      readFileSync(join(repo, '.speedpatrol/speedpatrol.yml'), 'utf8')
+        .replace('source: .', `source: ${JSON.stringify(repo)}`)
+        .replace(
+          / {2}optimizer:.*\n/,
+          `  optimizer: { use: { runtime: cli, command: 'node -e "setTimeout(() => {}, 60000)"' }, enabled: true, timeoutMinutes: 0.005 }\n`,
+        ),
+    );
+    try {
+      const result = spawnSync(
+        process.execPath,
+        [resolve(import.meta.dirname, '../../cli/dist/bin.js'), command, '--force'],
+        {
+          cwd: dir,
+          encoding: 'utf8',
+          timeout: 25_000,
+        },
+      );
+      expect(result.status, result.stdout + result.stderr).toBe(4);
+      const experiment = (await new Store(configDir).listExperiments()).at(-1)!;
+      expect(experiment.status).toBe('failed');
+      expect(experiment.headSha).toBeUndefined();
+      expect(experiment.comparisonId).toBeUndefined();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

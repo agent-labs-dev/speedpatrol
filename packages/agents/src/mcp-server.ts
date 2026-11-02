@@ -64,6 +64,9 @@ export async function serveTools(
     async close() {
       http.closeAllConnections();
       await new Promise<void>((done) => http.close(() => done()));
+      // Closing a disconnected client's transport does not cancel its A/B.
+      // Drain before verification or worktree cleanup can touch the same app.
+      await Promise.allSettled(running.values());
     },
   };
 }
@@ -100,13 +103,18 @@ async function handle(
     // A model may call two exclusive tools in one turn (the analyst bisects
     // two commits at once); run them one after the other.
     const exclusive = tools.find((item) => item.name === call.params.name)?.exclusive ?? false;
-    const pending = exclusive
+    const execution = exclusive
       ? lane.tail.then(() => callTool(tools, call.params.name, input, budget))
       : callTool(tools, call.params.name, input, budget);
+    const pending = execution
+      .then((result) => {
+        options.onCall?.(call.params.name, input, result, Date.now() - started);
+        return result;
+      })
+      .finally(() => running.delete(key));
     if (exclusive) lane.tail = pending;
     running.set(key, pending);
-    const result = await pending.finally(() => running.delete(key));
-    options.onCall?.(call.params.name, input, result, Date.now() - started);
+    const result = await pending;
     return { content: [{ type: 'text' as const, text: result.text }], isError: result.isError ?? false };
   });
   const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: true });

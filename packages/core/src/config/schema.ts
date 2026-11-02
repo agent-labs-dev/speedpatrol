@@ -242,7 +242,7 @@ const modelRuntimeSchema = z.object({
 const cliRuntimeSchema = z.object({
   runtime: z.literal('cli'),
   agent: z.enum(CLI_AGENTS).optional(),
-  /** `{prompt}`, `{mcp}`, `{mcpUrl}` and `{workdir}` are filled in. */
+  /** `{prompt}`, `{mcp}`, `{mcpUrl}`, `{workdir}` and `{timeoutSeconds}` are filled in. */
   command: z.string().optional(),
 });
 
