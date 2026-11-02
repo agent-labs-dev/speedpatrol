@@ -100,9 +100,11 @@ export class CliRuntime implements Runtime {
         mcp: mcpFile,
         mcpUrl: mcp.url,
         workdir: task.workdir,
+        timeoutSeconds: String(Math.ceil(task.timeoutMs / 1000)),
       };
-      const command = (this.use.command ?? '').replace(/\{(prompt|mcp|mcpUrl|workdir)\}/g, (_, name: string) =>
-        quote(values[name]!),
+      const command = (this.use.command ?? '').replace(
+        /\{(prompt|mcp|mcpUrl|workdir|timeoutSeconds)\}/g,
+        (_, name: string) => quote(values[name]!),
       );
       const child = spawn('/bin/sh', ['-c', command], {
         cwd: task.workdir,

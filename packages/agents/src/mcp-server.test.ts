@@ -10,6 +10,44 @@ async function connect(url: string): Promise<Client> {
 }
 
 describe('serveTools', () => {
+  it('drains an in-flight measurement before closing the session', async () => {
+    let start!: () => void;
+    let release!: () => void;
+    let completed = false;
+    const started = new Promise<void>((done) => {
+      start = done;
+    });
+    const pending = new Promise<void>((done) => {
+      release = done;
+    });
+    const mcp = await serveTools([
+      {
+        name: 'measure_change',
+        description: 'slow',
+        inputSchema: { type: 'object', properties: {} },
+        async run() {
+          start();
+          await pending;
+          completed = true;
+          return { text: 'done' };
+        },
+      },
+    ]);
+    const client = await connect(mcp.url);
+    const call = client.callTool({ name: 'measure_change', arguments: {} }).catch(() => undefined);
+    await started;
+    const timer = setTimeout(release, 100);
+    try {
+      await mcp.close();
+      expect(completed).toBe(true);
+    } finally {
+      release();
+      clearTimeout(timer);
+      await call;
+      await client.close();
+    }
+  });
+
   it('joins a repeated call to a tool that is still running instead of starting it again', async () => {
     let runs = 0;
     const mcp = await serveTools([

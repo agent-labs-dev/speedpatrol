@@ -1,6 +1,6 @@
 # Troubleshooting
 
-Start with `speedpatrol doctor`. It checks Node, git, the config, Chromium, the agent CLIs and `gh`. The exit codes are 0 ok, 1 regression, 2 config error, 4 could not measure.
+Start with `speedpatrol doctor`. It checks Node, git, the config, Chromium, the agent CLIs and `gh`. The exit codes are 0 ok, 1 regression, 2 config error, 4 measurement or agent failure.
 
 ## Setup and first runs
 
@@ -39,6 +39,8 @@ A run's verdict is the worst verdict of its benchmarks' primary metrics, so one 
 **A step in an Electron app is 1-2 s slower than it should be.** That is Playwright's actionability wait in a hidden or occluded window. Speedpatrol already skips it for clicks after the target is visible; if you wrote your own wait, remove it. See [the `electron` kind](configuration.md#electron).
 
 ## Agents
+
+**Codex reports `timed out awaiting tools/call` during an A/B.** The MCP call timed out before the benchmark finished. The Codex preset passes the role's `timeoutMinutes` as `mcp_servers.speedpatrol.tool_timeout_sec`. For a custom command, add `-c mcp_servers.speedpatrol.tool_timeout_sec={timeoutSeconds}` or use the preset. Set the session limit large enough for reading, edits, tests, and the expected A/B calls. A timed-out session is a failed run (exit 4), even if saved benchmark measurements succeeded; it is not evidence of a benchmark regression.
 
 **The analyst stops before it names a commit.** It ran out of `timeoutMinutes` (30 by default) while bisecting. Each `measure_commit` call is a full A/B run, so an app whose A/B takes minutes needs a larger limit. [Agent time limits](running-a-patrol.md#agent-time-limits) shows how to size it. The regression stays `open` and is not published until `speedpatrol analyze` finishes it.
 

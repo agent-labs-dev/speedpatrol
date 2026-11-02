@@ -178,7 +178,7 @@ export async function runOptimizer(options: {
       secrets: loaded.config.app.secrets.map((name) => process.env[name] ?? '').filter(Boolean),
       log,
     });
-    if (outcome.stop === 'error') {
+    if (outcome.stop !== 'done') {
       await save({ status: 'failed', reason: outcome.error });
       return { experiment };
     }

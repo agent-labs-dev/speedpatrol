@@ -183,7 +183,8 @@ export async function cycle(options: CycleOptions): Promise<CycleResult> {
       state: 'running',
       detail: 'No benchmarks: the scout looks for critical paths.',
     });
-    await runScout({ loaded, store, log });
+    const outcome = await runScout({ loaded, store, log });
+    if (outcome.stop !== 'done') throw new MeasureError(outcome.error);
     options = { ...options, loaded: await loadConfig(loaded.dir) };
   }
   await store.setStatus({ role: 'runner', state: 'running', detail: `Measuring ${agents.patrol.pull}` });
@@ -202,7 +203,10 @@ export async function cycle(options: CycleOptions): Promise<CycleResult> {
     throw error;
   }
   if (agents.analyst.enabled) {
-    for (const regression of result.confirmed) await runAnalyst({ loaded, store, regression, log });
+    for (const regression of result.confirmed) {
+      const { outcome } = await runAnalyst({ loaded, store, regression, log });
+      if (outcome.stop !== 'done') throw new MeasureError(outcome.error);
+    }
   } else {
     // Without an analyst the regression is still filed, with the numbers alone.
     for (const regression of result.confirmed) await store.saveRegression({ ...regression, status: 'filed' });
@@ -220,6 +224,7 @@ export async function cycle(options: CycleOptions): Promise<CycleResult> {
       log(
         `experiment ${experiment.id} on ${benchmark.id}: ${experiment.status}${experiment.reason ? ` (${experiment.reason})` : ''}`,
       );
+      if (experiment.status === 'failed') throw new MeasureError(experiment.reason);
     }
   }
   await syncGithub(loaded, store);

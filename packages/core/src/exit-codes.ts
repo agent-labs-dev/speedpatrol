@@ -3,6 +3,6 @@ export const EXIT = {
   /** A comparison found a regression on a primary metric. */
   regression: 1,
   config: 2,
-  /** Speedpatrol could not measure, e.g. the app did not start. */
+  /** Speedpatrol could not complete a measurement or agent session. */
   infra: 4,
 } as const;

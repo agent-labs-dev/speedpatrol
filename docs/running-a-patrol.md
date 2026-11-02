@@ -144,9 +144,11 @@ A bisection over `n` suspect commits needs about log2(n) + 1 A/Bs, plus a few mi
 
 When the analyst runs out of time before it writes its analysis, the regression stays `open`: it is recorded and shown on the dashboard, but no issue is published, and later cycles do not try again. Raise `timeoutMinutes`, then run `speedpatrol analyze` and `speedpatrol publish`. With the analyst off (`enabled: false`), regressions are published with the numbers alone.
 
-**The optimizer's limit is its working time.** Speedpatrol's own A/B verification runs after the optimizer stops, so the optimize step takes `timeoutMinutes` plus one A/B.
+**The optimizer's limit is its working time.** After a completed optimizer session, Speedpatrol runs its own A/B verification, so a successful optimize step takes up to `timeoutMinutes` plus one A/B. A timed-out or otherwise incomplete session fails the experiment and exits 4 without verification. Shutdown waits for any in-flight A/B to finish before cleaning up its worktree; this can extend the step past the session limit.
 
 **Agent CLIs get the limit too.** For a CLI runtime, Speedpatrol sets `MCP_TOOL_TIMEOUT` and `CLAUDE_CODE_MCP_TOOL_IDLE_TIMEOUT` to the role's timeout, so that Claude Code waits for a long A/B instead of abandoning it. A value already in Speedpatrol's environment wins over this, so do not export these two variables in the shell, unit or job that runs Speedpatrol.
+
+The Codex preset sets `mcp_servers.speedpatrol.tool_timeout_sec` to the same role limit. A custom Codex command overrides the preset: include `-c mcp_servers.speedpatrol.tool_timeout_sec={timeoutSeconds}` yourself, or switch to `use: codex`. The Claude timeout environment variables do not configure Codex. These settings leave the selected model, its reasoning effort, sandbox, and approvals unchanged.
 
 ## Publishing to GitHub
 

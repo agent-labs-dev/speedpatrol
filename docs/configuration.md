@@ -164,6 +164,6 @@ The command prints `{"metrics": {"render_ms": 12.3, "fps": 58}}` (or the list fo
 
 ## Agents
 
-`use` is a preset (`claude`, `codex`, `opencode`), a command (`{ runtime: cli, command: "..." }` with `{prompt}`, `{mcp}`, `{mcpUrl}`, `{workdir}`), or a model (`{ runtime: model, via: openrouter | openai | anthropic | custom, model: "...", endpoint: "..." }`, keys from `OPENROUTER_API_KEY`, `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `SPEEDPATROL_MODEL_API_KEY`).
+`use` is a preset (`claude`, `codex`, `opencode`), a command (`{ runtime: cli, command: "..." }` with `{prompt}`, `{mcp}`, `{mcpUrl}`, `{workdir}`, `{timeoutSeconds}`), or a model (`{ runtime: model, via: openrouter | openai | anthropic | custom, model: "...", endpoint: "..." }`, keys from `OPENROUTER_API_KEY`, `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `SPEEDPATROL_MODEL_API_KEY`).
 
 Each role also takes `maxSteps` (60), `timeoutMinutes` (30) and `budgetUsd` (model runtime only). [Agent time limits](running-a-patrol.md#agent-time-limits) tells how to size them.

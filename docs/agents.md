@@ -23,7 +23,7 @@ agents:
     use: { runtime: model, via: openrouter, model: anthropic/claude-sonnet-5.5 }
 ```
 
-`use: claude | codex | opencode` selects a preset command. `{ runtime: cli, command: "..." }` runs any command, and fills in `{prompt}`, `{mcp}`, `{mcpUrl}`, and `{workdir}`. [Configuration](configuration.md#agents) tells the model runtimes and their API keys.
+`use: claude | codex | opencode` selects a preset command. `{ runtime: cli, command: "..." }` runs any command, and fills in `{prompt}`, `{mcp}`, `{mcpUrl}`, `{workdir}`, and `{timeoutSeconds}` (the role's time limit, rounded up to seconds). [Configuration](configuration.md#agents) tells the model runtimes and their API keys.
 
 ## Tools
 
@@ -39,7 +39,7 @@ The tools are the contract (ADR 0003). A CLI agent gets them over a local MCP se
 | `use:` | Scout and analyst | Optimizer |
 | --- | --- | --- |
 | `claude` | `claude -p --output-format json --tools 'Read,Grep,Glob' --mcp-config {mcp} --strict-mcp-config --allowedTools 'mcp__speedpatrol,Read,Grep,Glob'` | `claude -p --output-format json --permission-mode auto --mcp-config {mcp} --allowedTools mcp__speedpatrol` |
-| `codex` | `codex exec --json --skip-git-repo-check --sandbox read-only -c mcp_servers.speedpatrol.url={mcpUrl} -c mcp_servers.speedpatrol.default_tools_approval_mode=approve -` | the same with `--sandbox workspace-write` |
+| `codex` | `codex exec --json --skip-git-repo-check --sandbox read-only -c mcp_servers.speedpatrol.url={mcpUrl} -c mcp_servers.speedpatrol.default_tools_approval_mode=approve -c mcp_servers.speedpatrol.tool_timeout_sec={timeoutSeconds} -` | the same with `--sandbox workspace-write` |
 | `opencode` | `opencode run --format json`, with the MCP server and edits denied in `OPENCODE_CONFIG_CONTENT` | the same, edits allowed |
 
 The prompt goes to the command's stdin and to the file `{prompt}`. A preset is only a default: `{ runtime: cli, command: "..." }` runs anything.
@@ -47,3 +47,5 @@ The prompt goes to the command's stdin and to the file `{prompt}`. A preset is o
 ## Sessions
 
 Each session writes `sessions/<id>/events.jsonl` and updates `agents.json`. Every secret value (`app.secrets` and captured values) is redacted from both. A role stops at `maxSteps` tool calls (60), `timeoutMinutes` (30), or `budgetUsd` (model runtime). [Agent time limits](running-a-patrol.md#agent-time-limits) tells how to size them.
+
+A successful session completes `finish` and stops normally. A timeout, exhausted budget, CLI error, or missing `finish` records an error event and a failed status. An incomplete optimizer session saves a failed experiment without committing or verifying its candidate. `scout`, `analyze`, `optimize`, and a failed `--once` cycle exit 4; a completed optimizer experiment that proves no speed-up is still a normal rejection and exits 0.

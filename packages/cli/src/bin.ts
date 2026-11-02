@@ -95,7 +95,7 @@ async function main(argv: Argv): Promise<number> {
       const { loaded, store } = await load(cwd);
       const outcome = await runScout({ loaded, store, log, focus: strFlag(flags, 'focus') });
       out(outcome.summary ?? outcome.stop);
-      return outcome.stop === 'error' ? EXIT.infra : EXIT.ok;
+      return outcome.stop === 'done' ? EXIT.ok : EXIT.infra;
     }
     case 'analyze': {
       const { loaded, store } = await load(cwd);
@@ -103,11 +103,13 @@ async function main(argv: Argv): Promise<number> {
         positional.length ? positional.includes(r.id) : r.status === 'open' || (r.status === 'filed' && !r.analysis),
       );
       if (targets.length === 0) out('No regression to analyze.');
+      let failed = false;
       for (const regression of targets) {
         const result = await runAnalyst({ loaded, store, regression, log });
         out(`${regression.id}: ${result.regression.title}`);
+        if (result.outcome.stop !== 'done') failed = true;
       }
-      return EXIT.ok;
+      return failed ? EXIT.infra : EXIT.ok;
     }
     case 'optimize': {
       const { loaded, store } = await load(cwd);
@@ -125,7 +127,7 @@ async function main(argv: Argv): Promise<number> {
       );
       if (experiment.status === 'improved')
         out(`Branch ${experiment.branch} in ${experiment.worktree}. Run \`speedpatrol publish\` to open the PR.`);
-      return EXIT.ok;
+      return experiment.status === 'failed' ? EXIT.infra : EXIT.ok;
     }
     case 'publish': {
       const { loaded, store } = await load(cwd);
