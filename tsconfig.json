@@ -1,0 +1,11 @@
+{
+  "files": [],
+  "references": [
+    { "path": "packages/core" },
+    { "path": "packages/stats" },
+    { "path": "packages/probes" },
+    { "path": "packages/agents" },
+    { "path": "packages/dashboard" },
+    { "path": "packages/cli" }
+  ]
+}

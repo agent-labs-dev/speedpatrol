@@ -1,0 +1,52 @@
+# Speedpatrol config for the fixture app. Used by the end-to-end tests and as
+# a worked example: an API, a page with screen navigation, a server's cold
+# start, a CLI command, and a self-measuring script.
+version: 1
+project:
+  name: fixture-app
+  source: .
+app:
+  setup:
+    - run: node server.js
+      background: true
+      readyUrl: http://127.0.0.1:${PORT}/api/health
+  env:
+    PORT: "4390"
+defaults:
+  iterations: 10
+  warmup: 2
+benchmarks:
+  - id: api.items
+    kind: http
+    critical: true
+    request:
+      url: http://127.0.0.1:${PORT}/api/items
+  - id: api.health
+    kind: http
+    request:
+      url: http://127.0.0.1:${PORT}/api/health
+  - id: web.home
+    kind: web
+    url: http://127.0.0.1:${PORT}/
+    steps:
+      - name: open-settings
+        click: "#settings"
+        waitFor: "#settings-title"
+  - id: startup.server
+    kind: startup
+    run: node server.js
+    env:
+      PORT: "4391"
+    ready:
+      url: http://127.0.0.1:4391/api/health
+  - id: cli.work
+    kind: command
+    run: node cli.js
+  - id: script.work
+    kind: custom
+    run: node cli.js --metrics
+    metrics:
+      work_ms: { unit: ms, better: lower }
+agents:
+  scout: { enabled: false }
+  analyst: { enabled: false }
