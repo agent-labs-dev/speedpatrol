@@ -90,6 +90,8 @@ When you change code for performance, verify with `compare` before claiming a sp
 
 Use `use: codex` to inherit the MCP tool timeout from the role's `timeoutMinutes`. A custom Codex command must include `-c mcp_servers.speedpatrol.tool_timeout_sec={timeoutSeconds}`. Size the session limit for edits, tests, and all A/B calls; shutdown drains an in-flight measurement before cleanup.
 
+For optimizer timeouts, inspect the primary metric and the session's `measure_change` durations before raising the limit. `get_target` supplies improvement requirements and remaining working time. Trials prepare each side once and run one A/B round without profiling; the result reports duration and remaining time. Keep the machine idle during a measurement. Finish a promising candidate after its required checks so Speedpatrol can run the separate full verification outside the session limit. Revert unsuccessful edits and finish without a candidate when another trial cannot fit. Never salvage an incomplete session or weaken the measurement thresholds to publish a change.
+
 ## 5. CI
 
 Add `.github/workflows/speedpatrol.yml` with `agent-labs-dev/speedpatrol@v0` (checkout with `fetch-depth: 0`) to post an A/B table on every pull request. See https://github.com/agent-labs-dev/speedpatrol/blob/main/docs/ci.md.

@@ -22,11 +22,13 @@ const SYSTEM = `You are the optimizer of Speedpatrol, a team of agents that keep
 You work in your own git worktree (the current directory), on a branch made for you. Your job: make one benchmark faster without making anything else slower, with a change a reviewer would merge.
 
 How to work:
-1. get_target shows the benchmark, its latest numbers and its CPU hotspots. Read the code on that path.
-2. Form one hypothesis (e.g. "loadOrders queries once per row; batch it"). Prefer algorithmic and I/O fixes (N+1 queries, repeated work, missing caching or memoization, oversized payloads, blocking calls, needless re-renders) over micro-tuning.
-3. Edit the code. Keep behaviour identical, keep the change small, follow the repo's style, and run the repo's own tests for the code you touched.
-4. Call measure_change to A/B your worktree against the base. Iterate while it helps.
-5. Call finish with a title and what changed. The title says what the code change does, for a reviewer who does not know the benchmark. Do not commit, push or open a PR: Speedpatrol verifies and publishes.
+1. get_target shows the primary metric, latest numbers, CPU hotspots and remaining working time. Trace what the primary metric actually times, including its wait conditions; a CPU hotspot alone is not evidence that removing it can clear the improvement threshold.
+2. Call set_hypothesis with one hypothesis (e.g. "loadOrders queries once per row; batch it") and why it can materially improve the primary metric. Prefer algorithmic and I/O fixes (N+1 queries, repeated work, oversized payloads, blocking calls, needless re-renders) over micro-tuning or speculative import rewrites.
+3. Edit the code. Keep behaviour identical, keep the change small, and follow the repo's required checks. Measure a plausible candidate before optional broad validation; run the required checks before finishing a candidate for publication. Do not fix unrelated lint or test failures.
+4. Call measure_change to A/B your worktree against the base. It prepares both sides and measures one round without profiling. Wait without editing files or running builds, tests or other CPU-heavy work during measurement.
+5. When the primary metric improves without collateral regressions and the required checks pass, call finish promptly: Speedpatrol runs a separate full A/B verification after the session, outside your working-time limit. Do not spend the remaining budget remeasuring an unchanged candidate. For an unchanged or regressed result, revert it before trying a different hypothesis, and only start another A/B if the remaining time covers the last A/B duration plus edits, required checks and finish. Otherwise revert unsuccessful edits and call finish explaining that no candidate worked.
+
+Call finish with a title and what changed. The title says what the code change does, for a reviewer who does not know the benchmark. Do not commit, push or open a PR: Speedpatrol verifies and publishes.
 
 Only the measurement decides whether the change is kept: an improvement smaller than the threshold, or any regression elsewhere, discards it.`;
 
@@ -40,7 +42,7 @@ function targetDescription(benchmark: Benchmark, run: Run | undefined): string {
         )
         .join('\n')
     : 'not measured yet';
-  return `# Target\n\n${JSON.stringify(benchmark, null, 2)}\n\n## Latest numbers\n${metrics}\n\n## Profile\n${profileDiffText(undefined, run, benchmark.id)}`;
+  return `# Target\n\n${JSON.stringify(benchmark, null, 2)}\n\n## Primary metric\n${result?.primary ?? benchmark.primary ?? 'Not measured yet.'}\n\n## Latest numbers\n${metrics}\n\n## Profile\n${profileDiffText(undefined, run, benchmark.id)}`;
 }
 
 /**
@@ -104,18 +106,27 @@ export async function runOptimizer(options: {
   const guard = [benchmark.id, ...critical];
   try {
     await prepare(loaded, worktree, log);
+    const deadline = Date.now() + config.timeoutMinutes * 60_000;
+    const remaining = () =>
+      `Working time remaining: ${Math.max(0, (deadline - Date.now()) / 60_000).toFixed(1)} minutes.`;
+    const target = () =>
+      `${targetDescription(benchmark, options.baseRun)}\n\n## Working budget\n${remaining()}\nSession limit: ${config.timeoutMinutes} minutes. Final A/B verification runs after finish.\n\n## Improvement requirements\n${JSON.stringify(loaded.config.thresholds)}\nOptimizer minimum improvement: ${(config.minImprovement * 100).toFixed(1)}%. The primary metric must also receive an improvement verdict.`;
     let hypothesis: string | undefined;
     const tools = [
-      tool('get_target', 'The benchmark to speed up, its latest numbers and its CPU hotspots.', {}, [], async () => ({
-        text: targetDescription(benchmark, options.baseRun),
-      })),
+      tool(
+        'get_target',
+        'The benchmark, primary metric, latest numbers, CPU hotspots, improvement requirements and remaining working time.',
+        {},
+        [],
+        async () => ({ text: target() }),
+      ),
       tool(
         'measure_change',
-        'A/B measure your worktree against the base commit, for the target and the critical benchmarks. Takes a minute or more.',
+        'A/B measure your worktree against the base commit, for the target and the critical benchmarks. Returns duration and remaining working time. Keep the machine idle while it runs.',
         {},
         [],
         async () => {
-          await prepare(loaded, worktree, log);
+          const started = Date.now();
           const { comparison } = await abCompare({
             loaded,
             store,
@@ -126,7 +137,10 @@ export async function runOptimizer(options: {
             profile: false,
             log,
           });
-          return { text: comparisonMarkdown(comparison), summary: `Measured: ${comparison.verdict}.` };
+          return {
+            text: `${comparisonMarkdown(comparison)}\n\nA/B duration: ${((Date.now() - started) / 60_000).toFixed(1)} minutes. ${remaining()}\nFinish a promising candidate for full verification; revert unsuccessful edits before finishing without a candidate.`,
+            summary: `Measured: ${comparison.verdict}.`,
+          };
         },
         { exclusive: true },
       ),
@@ -168,7 +182,7 @@ export async function runOptimizer(options: {
       role: 'optimizer',
       use: config.use,
       system: `${SYSTEM}\n\n# App guide\n\n${await readInstructions(loaded)}`,
-      prompt: `Make \`${benchmark.id}\` faster.\n\n${targetDescription(benchmark, options.baseRun)}`,
+      prompt: `Make \`${benchmark.id}\` faster.\n\n${target()}`,
       tools,
       maxSteps: config.maxSteps,
       timeoutMinutes: config.timeoutMinutes,
@@ -227,7 +241,6 @@ async function verify(
   save: (patch: Partial<Experiment>) => Promise<void>,
   log: (line: string) => void,
 ): Promise<OptimizerResult> {
-  await prepare(loaded, experiment.worktree, log);
   const { comparison } = await abCompare({
     loaded,
     store,
