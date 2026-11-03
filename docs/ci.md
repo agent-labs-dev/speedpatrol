@@ -36,6 +36,8 @@ jobs:
 
 The checkout needs the base branch: use `fetch-depth: 0`. A `web` or `electron` benchmark needs Chromium; the Action installs it when the config has one.
 
+To run the same comparison on your machine, use `speedpatrol compare --pr <number>`.
+
 Exit codes: 0 no regression, 1 regression (with `fail-on-regression`), 2 config error, 4 could not measure (the app did not start).
 
 ## Noise on shared runners

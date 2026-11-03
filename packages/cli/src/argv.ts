@@ -24,6 +24,7 @@ const COMMANDS = new Set([
 const VALUED = new Set([
   'base',
   'head',
+  'pr',
   'iterations',
   'rounds',
   'port',

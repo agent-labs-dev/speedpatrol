@@ -42,8 +42,11 @@ npx speedpatrol
 speedpatrol compare                           # this working tree (with uncommitted changes) vs origin/main
 speedpatrol compare --head ../my-worktree     # a worktree vs origin/main
 speedpatrol compare --base v1.4.0 --head main # two refs
+speedpatrol compare --pr 123                  # a GitHub PR vs its base branch (a PR URL also works)
 speedpatrol compare api.orders web.inbox      # only some benchmarks (ids or tags)
 ```
+
+`--pr` needs the [GitHub CLI](https://cli.github.com), logged in. Speedpatrol fetches `refs/pull/<n>/head` from `origin`, so a PR from a fork also works. `--base` replaces the PR's base branch. `--pr` and `--head` together are a config error.
 
 `compare` prints a table. It exits with code 1 when a primary metric regressed:
 

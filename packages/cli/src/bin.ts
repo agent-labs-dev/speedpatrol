@@ -80,6 +80,7 @@ async function main(argv: Argv): Promise<number> {
         store,
         base: strFlag(flags, 'base'),
         head: strFlag(flags, 'head'),
+        pr: strFlag(flags, 'pr'),
         only: positional,
         rounds: intFlag(flags, 'rounds'),
         iterations: intFlag(flags, 'iterations'),
