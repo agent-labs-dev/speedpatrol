@@ -32,7 +32,7 @@ The tools are the contract (ADR 0003). A CLI agent gets them over a local MCP se
 - **Every role:** `list_files`, `read_file`, `search` (read-only, inside the repo or the worktree), `finish`.
 - **Scout:** `benchmark_help`, `list_benchmarks`, `try_benchmark` (starts the app on first use, runs 3 trials), `save_benchmark` (only a benchmark that `try_benchmark` ran with exactly this definition), `remove_benchmark` (scouted ones only).
 - **Analyst:** `git_log`, `git_show`, `profile_diff`, `measure_commit` (an A/B run of any commit against another, for a bisection), `write_analysis`.
-- **Optimizer:** `get_target`, `set_hypothesis`, `git_diff`, `measure_change` (an A/B run of the worktree against the base).
+- **Optimizer:** `get_target` (including the primary metric, improvement requirements and remaining working time), `set_hypothesis`, `git_diff`, `measure_change` (one A/B round of the worktree against the base, without profiling; returns its duration and remaining working time).
 
 ## Presets
 
@@ -49,3 +49,5 @@ The prompt goes to the command's stdin and to the file `{prompt}`. A preset is o
 Each session writes `sessions/<id>/events.jsonl` and updates `agents.json`. Every secret value (`app.secrets` and captured values) is redacted from both. A role stops at `maxSteps` tool calls (60), `timeoutMinutes` (30), or `budgetUsd` (model runtime). [Agent time limits](running-a-patrol.md#agent-time-limits) tells how to size them.
 
 A successful session completes `finish` and stops normally. A timeout, exhausted budget, CLI error, or missing `finish` records an error event and a failed status. An incomplete optimizer session saves a failed experiment without committing or verifying its candidate. `scout`, `analyze`, `optimize`, and a failed `--once` cycle exit 4; a completed optimizer experiment that proves no speed-up is still a normal rejection and exits 0.
+
+The optimizer traces the primary metric's timed path before choosing a candidate. It keeps the machine idle during A/B calls and finishes a promising candidate for the separate full verification rather than repeatedly measuring the same change. If there is no time for another edit, measurement and required checks, it reverts unsuccessful edits and finishes without a candidate.

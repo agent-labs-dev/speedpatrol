@@ -61,7 +61,7 @@ describe('measure and compare the fixture app', () => {
     const loaded = await loadConfig(repo);
     const store = new Store(loaded.dir);
     const base = await checkout(repo, store, 'HEAD~1');
-    const { comparison } = await abCompare({
+    const { comparison, runs } = await abCompare({
       loaded,
       store,
       base: { label: 'main~1', dir: base.dir },
@@ -69,7 +69,9 @@ describe('measure and compare the fixture app', () => {
       only: ['api.items', 'api.health', 'cli.work'],
       iterations: 10,
       rounds: 2,
+      profile: false,
     });
+    for (const result of runs.flatMap((run) => run.results)) expect(result.profile).toBeUndefined();
     const verdict = (benchmark: string) =>
       comparison.metrics.find((metric) => metric.benchmark === benchmark && metric.primary)?.verdict;
     expect(verdict('api.items')).toBe('regression');

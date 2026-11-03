@@ -127,7 +127,12 @@ export async function abCompare(options: AbOptions): Promise<{ comparison: Compa
     const order = round % 2 === 0 ? [base, head] : [head, base];
     for (const side of order) {
       log(`round ${round + 1}/${rounds}: ${side.label}`);
-      const run = await measure({ ...options, source: side.dir, purpose: 'compare', profile: round === 0 });
+      const run = await measure({
+        ...options,
+        source: side.dir,
+        purpose: 'compare',
+        profile: options.profile !== false && round === 0,
+      });
       if (run.failed) throw new MeasureError(`${side.label}: ${run.failed}`);
       (side === base ? baseRuns : headRuns).push(run);
     }
