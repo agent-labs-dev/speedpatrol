@@ -12,8 +12,9 @@ Commands:
                          --iterations N, --json, --fail-on-regression
   compare [ids|tags...]  A/B two checkouts on this machine: --base <ref> (default
                          origin/main), --head <dir|ref> (default: this checkout, with
-                         its uncommitted changes). --rounds N, --iterations N,
-                         --markdown <file>, --json. Exits 1 on a regression.
+                         its uncommitted changes), or --pr <number|url> (a GitHub pull
+                         request against its base branch; needs gh). --rounds N,
+                         --iterations N, --markdown <file>, --json. Exits 1 on a regression.
   scout                  The scout finds critical paths and writes benchmarks. --focus "<text>"
   analyze [id]           The analyst explains open regressions.
   optimize [benchmark]   The optimizer tries a speed-up in a worktree, then Speedpatrol

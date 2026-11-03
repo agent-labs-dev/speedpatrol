@@ -1,5 +1,6 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
+import { ConfigError } from './errors.js';
 
 const exec = promisify(execFile);
 
@@ -13,6 +14,24 @@ export async function tryGit(cwd: string, args: string[]): Promise<string | unde
     return await git(cwd, args);
   } catch {
     return undefined;
+  }
+}
+
+/**
+ * Runs the GitHub CLI. A missing `gh` or a missing login is a ConfigError:
+ * the user must fix the machine, not retry.
+ */
+export async function gh(cwd: string, args: string[]): Promise<string> {
+  try {
+    const { stdout } = await exec('gh', args, { cwd, maxBuffer: 16 * 1024 * 1024 });
+    return stdout.trim();
+  } catch (error) {
+    const { code, stderr } = error as { code?: unknown; stderr?: string };
+    if (code === 'ENOENT') throw new ConfigError('gh is not installed. Install the GitHub CLI: https://cli.github.com');
+    // gh exits 4 when it has no login; a bad token gives HTTP 401.
+    if (code === 4 || /HTTP 401|gh auth login/.test(stderr ?? ''))
+      throw new ConfigError('gh is not logged in. Run `gh auth login`, or set GH_TOKEN.');
+    throw error;
   }
 }
 

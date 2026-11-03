@@ -1,9 +1,10 @@
 import { existsSync, statSync } from 'node:fs';
 import { writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
-import { type Comparison, type LoadedConfig, type Run, type Store, tryGit } from '@speedpatrol/core';
+import { type Comparison, ConfigError, type LoadedConfig, type Run, type Store, tryGit } from '@speedpatrol/core';
 import { abCompare, checkout, compareWithBaseline, measure, prepare, recordBaseline } from '@speedpatrol/probes';
 import { comparisonMarkdown, formatValue } from '@speedpatrol/stats';
+import { fetchPullRequest } from './pr.js';
 
 export function runTable(run: Run): string {
   const rows = run.results.map((result) => {
@@ -60,6 +61,8 @@ export async function compareCommand(options: {
   store: Store;
   base?: string;
   head?: string;
+  /** A pull request number or URL: its head is the head side, its base branch the default base. */
+  pr?: string;
   only: string[];
   rounds?: number;
   iterations?: number;
@@ -67,9 +70,17 @@ export async function compareCommand(options: {
   log: (line: string) => void;
 }): Promise<Comparison> {
   const { loaded, store, log } = options;
-  const baseRef = options.base ?? loaded.config.agents.patrol.pull;
-  const base = await side(loaded, store, baseRef);
-  const head = options.head ? await side(loaded, store, options.head) : { label: 'working tree', dir: loaded.source };
+  if (options.pr !== undefined && options.head !== undefined) throw new ConfigError('Give --pr or --head, not both.');
+  const pr =
+    options.pr !== undefined
+      ? await fetchPullRequest(loaded.source, options.pr, { fetchBase: options.base === undefined })
+      : undefined;
+  const base = await side(loaded, store, options.base ?? pr?.base ?? loaded.config.agents.patrol.pull);
+  const head = pr
+    ? { ...(await side(loaded, store, pr.head)), label: `#${pr.number}` }
+    : options.head
+      ? await side(loaded, store, options.head)
+      : { label: 'working tree', dir: loaded.source };
   const { comparison } = await abCompare({
     loaded,
     store,

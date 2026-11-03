@@ -1,8 +1,7 @@
-import { execFile } from 'node:child_process';
-import { promisify } from 'node:util';
 import {
   type Comparison,
   type Experiment,
+  gh,
   git,
   type LoadedConfig,
   type MetricComparison,
@@ -11,13 +10,6 @@ import {
   type Unit,
 } from '@speedpatrol/core';
 import { comparisonMarkdown, formatPct, formatValue } from '@speedpatrol/stats';
-
-const exec = promisify(execFile);
-
-async function gh(cwd: string, args: string[]): Promise<string> {
-  const { stdout } = await exec('gh', args, { cwd, maxBuffer: 16 * 1024 * 1024 });
-  return stdout.trim();
-}
 
 /**
  * Creates each label on the target repo, so the first `--label` on a repo that
