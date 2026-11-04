@@ -90,11 +90,29 @@ function stepMetrics(steps: FlowStep[]): Record<string, MetricSpec> {
 /** Selector retry backoff can add 500 ms to a timed wait. Bound the polling gap instead. */
 async function waitForVisible(locator: Locator, timeoutMs: number): Promise<void> {
   const deadline = performance.now() + timeoutMs;
-  while (performance.now() < deadline) {
-    if (await locator.isVisible()) return;
-    await delay(5);
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let expired = false;
+  const timedOut = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => {
+      expired = true;
+      reject(new errors.TimeoutError(`Timeout ${timeoutMs}ms exceeded waiting for ${locator} to be visible`));
+    }, timeoutMs);
+  });
+  const poll = async () => {
+    while (!expired && performance.now() < deadline) {
+      if ((await locator.isVisible()) && !expired) return;
+      await delay(5);
+    }
+    throw new errors.TimeoutError(`Timeout ${timeoutMs}ms exceeded waiting for ${locator} to be visible`);
+  };
+  const polling = poll();
+  // A late query result after the deadline must not surface as an unhandled rejection.
+  polling.catch(() => undefined);
+  try {
+    await Promise.race([polling, timedOut]);
+  } finally {
+    clearTimeout(timer);
   }
-  throw new errors.TimeoutError(`Timeout ${timeoutMs}ms exceeded waiting for ${locator} to be visible`);
 }
 
 /**
