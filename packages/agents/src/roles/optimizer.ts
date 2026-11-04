@@ -254,7 +254,7 @@ async function verify(
   const collateral = primary
     .filter((metric) => metric.benchmark !== experiment.target.benchmark && metric.verdict === 'regression')
     .map((metric) => `${metric.benchmark} ${formatPct(metric.deltaPct)}`);
-  const min = loaded.config.agents.optimizer.minImprovement;
+  const min = Math.max(loaded.config.agents.optimizer.minImprovement, loaded.config.thresholds.relative);
   const improved = target?.verdict === 'improvement' && -target.deltaPct >= min && collateral.length === 0;
   await save({
     status: improved ? 'improved' : 'rejected',

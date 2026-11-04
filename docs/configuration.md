@@ -46,6 +46,8 @@ agents:
 
 `${NAME}` in commands, URLs, headers and bodies is replaced by an env var, an `app.env` value or a captured value.
 
+Optimizer publication must clear both `thresholds.relative` and `agents.optimizer.minImprovement`: the larger is the effective percentage floor. The absolute threshold and significance checks also apply. For example, `relative: 0.10` with `minImprovement: 0.05` requires at least 10%; it cannot publish a 5–10% improvement. Set both to `0.05` when the intended floor is 5%.
+
 ## Benchmarks
 
 Every benchmark has:
