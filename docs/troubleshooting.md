@@ -30,6 +30,8 @@ Start with `speedpatrol doctor`. It checks Node, git, the config, Chromium, the 
 - Other work on the machine during the measurement. Move it to another time.
 - Too few samples. Raise `iterations`, or `rounds` for A/B runs.
 
+Measure the same commit repeatedly before raising the publication threshold. Compare both the variation of individual samples and the variation of pass medians: taking more samples in one pass does not remove drift between passes. The [mobile navigation study](measurements/2026-11-04-mobile-navigation.md) includes an unchanged-code calibration and distinguishes a configured threshold from statistical uncertainty.
+
 A run's verdict is the worst verdict of its benchmarks' primary metrics, so one noisy benchmark makes the whole run read `noisy` while the others are `unchanged`. Look at the per-benchmark rows.
 
 **A web benchmark on a dev server times out or is very slow on cold loads.** Dev servers compile on the first request. Build the app in `app.prepare` (a production build, or a static export) and serve the build in `app.setup`.

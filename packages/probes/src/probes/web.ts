@@ -1,6 +1,15 @@
 import { writeFile } from 'node:fs/promises';
+import { setTimeout as delay } from 'node:timers/promises';
 import { type Benchmark, type FlowStep, interpolate, type MetricSpec, type ProfileArtifact } from '@speedpatrol/core';
-import { type Browser, type BrowserContext, type CDPSession, chromium, type Page } from 'playwright';
+import {
+  type Browser,
+  type BrowserContext,
+  type CDPSession,
+  chromium,
+  errors,
+  type Locator,
+  type Page,
+} from 'playwright';
 import { type Background, startBackground, waitUntil } from '../exec.js';
 import { type CpuProfile, hotspots } from '../profile.js';
 import { resolveCwd, resolveEnv } from './command.js';
@@ -78,6 +87,16 @@ function stepMetrics(steps: FlowStep[]): Record<string, MetricSpec> {
   };
 }
 
+/** Selector retry backoff can add 500 ms to a timed wait. Bound the polling gap instead. */
+async function waitForVisible(locator: Locator, timeoutMs: number): Promise<void> {
+  const deadline = performance.now() + timeoutMs;
+  while (performance.now() < deadline) {
+    if (await locator.isVisible()) return;
+    await delay(5);
+  }
+  throw new errors.TimeoutError(`Timeout ${timeoutMs}ms exceeded waiting for ${locator} to be visible`);
+}
+
 /**
  * One flow step, timed from the action until its wait condition holds.
  *
@@ -88,7 +107,7 @@ function stepMetrics(steps: FlowStep[]): Record<string, MetricSpec> {
  * an Electron app it added 1-2 s to a 40 ms screen switch, so the step timed
  * the tool instead of the app.
  */
-async function runStep(page: Page, step: FlowStep, context: ProbeContext): Promise<number> {
+export async function runStep(page: Page, step: FlowStep, context: ProbeContext): Promise<number> {
   const timeout = context.timeoutMs;
   const clickTarget = step.click ? page.locator(step.click).first() : undefined;
   const fillTarget = step.fill ? page.locator(step.fill.selector).first() : undefined;
@@ -100,7 +119,7 @@ async function runStep(page: Page, step: FlowStep, context: ProbeContext): Promi
   if (fillTarget && step.fill)
     await fillTarget.fill(interpolate(step.fill.value, context.vars), { force: true, timeout });
   if (step.press) await page.keyboard.press(step.press);
-  if (step.waitFor) await page.locator(step.waitFor).first().waitFor({ state: 'visible', timeout });
+  if (step.waitFor) await waitForVisible(page.locator(step.waitFor).first(), timeout);
   if (step.waitForNetworkIdle) await page.waitForLoadState('networkidle', { timeout });
   return performance.now() - started;
 }
@@ -241,7 +260,7 @@ export const electronProbe: ProbeFactory<'electron'> = (benchmark, context) => {
       const cdp = await page.context().newCDPSession(page);
       if (file) await startProfiler(cdp);
       if (benchmark.readySelector) {
-        await page.locator(benchmark.readySelector).first().waitFor({ state: 'visible', timeout: context.timeoutMs });
+        await waitForVisible(page.locator(benchmark.readySelector).first(), context.timeoutMs);
       } else {
         await page.waitForLoadState('load', { timeout: context.timeoutMs });
       }
@@ -309,10 +328,7 @@ function attachProbe(benchmark: Extract<Benchmark, { kind: 'electron' }>, port: 
         const started = performance.now();
         await page!.reload({ waitUntil: 'load', timeout: context.timeoutMs });
         if (benchmark.readySelector) {
-          await page!
-            .locator(benchmark.readySelector)
-            .first()
-            .waitFor({ state: 'visible', timeout: context.timeoutMs });
+          await waitForVisible(page!.locator(benchmark.readySelector).first(), context.timeoutMs);
         }
         metrics.ready_ms = performance.now() - started;
         Object.assign(metrics, clean((await page!.evaluate(READ_METRICS)) as Record<string, unknown>));

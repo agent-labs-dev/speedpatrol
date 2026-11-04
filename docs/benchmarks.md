@@ -16,6 +16,10 @@ A benchmark is one critical path and the method to measure it. Its `kind` select
 
 Web throttling (`cpuThrottle`, `network: 4g | fast-3g | slow-3g`) uses the Chrome DevTools presets.
 
+Timed `web` and `electron` readiness waits check the first matching locator's visibility with a fixed 5 ms pause between checks. Playwright's general selector wait increases its retry interval up to 500 ms, which can overwhelm a small performance change. Checks still use Playwright's selector engines and visibility rules; their total interval also includes browser and scheduler time. A missing selector fails at the benchmark timeout.
+
+Re-record web/Electron baselines after upgrading from the older selector waits. A lower measurement caused by a more precise harness is not an app speed-up. See the [mobile navigation measurement study](measurements/2026-11-04-mobile-navigation.md) for repeated unchanged-code runs and threshold guidance.
+
 ## Profiles
 
 After the timed iterations, Speedpatrol runs one more iteration with a profiler on. So the profiler never slows a timed sample.

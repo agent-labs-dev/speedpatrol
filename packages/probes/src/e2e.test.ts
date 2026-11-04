@@ -3,8 +3,10 @@ import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:f
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { loadConfig, Store } from '@speedpatrol/core';
+import { chromium, errors } from 'playwright';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { abCompare, checkout, compareWithBaseline, recordBaseline } from './compare.js';
+import { runStep } from './probes/web.js';
 import { measure } from './runner.js';
 
 const fixture = resolve(import.meta.dirname, '../../../examples/fixture-app');
@@ -14,6 +16,36 @@ function gitIn(dir: string, ...args: string[]) {
     cwd: dir,
   });
 }
+
+it('detects asynchronous screen readiness without adding selector retry backoff', async () => {
+  const browser = await chromium.launch();
+  try {
+    const page = await browser.newPage();
+    await page.setContent(`<button onclick="setTimeout(() => {
+      document.querySelector('#ready').hidden = false;
+      performance.mark('ready');
+    }, 350)">Open</button><div id="ready" hidden>Ready</div>`);
+    await runStep(
+      page,
+      { name: 'open', click: 'text=Open', waitFor: 'text=Ready', waitForNetworkIdle: false },
+      { source: fixture, vars: {}, timeoutMs: 10_000, log: () => {} },
+    );
+    // Compare with the actual render, even if a busy runner fires the timer late.
+    const detectionLag = await page.evaluate(
+      () => performance.now() - performance.getEntriesByName('ready')[0]!.startTime,
+    );
+    expect(detectionLag).toBeLessThan(150);
+    await expect(
+      runStep(
+        page,
+        { name: 'missing', waitFor: 'text=Missing', waitForNetworkIdle: false },
+        { source: fixture, vars: {}, timeoutMs: 50, log: () => {} },
+      ),
+    ).rejects.toBeInstanceOf(errors.TimeoutError);
+  } finally {
+    await browser.close();
+  }
+});
 
 /**
  * The whole measuring path against real processes and a real Chromium: the
