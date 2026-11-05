@@ -27,6 +27,48 @@ export type ExecResult = {
 
 // Overridable so a machine without GNU time can still exercise this path.
 const GNU_TIME = process.env.SPEEDPATROL_GNU_TIME ?? '/usr/bin/time';
+// Process group ids, tracked apart from their leaders: a dev server's
+// grandchild can outlive the bash leader and keep its port bound.
+const groups = new Set<number>();
+
+/** True while a process of the group is alive; drops the id once it is gone. */
+function groupAlive(pgid: number): boolean {
+  try {
+    process.kill(-pgid, 0);
+    return true;
+  } catch {
+    // ESRCH: the group is gone. EPERM: the id now belongs to someone else.
+    groups.delete(pgid);
+    return false;
+  }
+}
+
+export function registerGroup(child: ChildProcess): void {
+  const pgid = child.pid;
+  if (pgid === undefined || groups.has(pgid)) return;
+  groups.add(pgid);
+  child.once('exit', () => groupAlive(pgid));
+}
+
+/** Returns false where the group is gone or group signals are unsupported (Windows). */
+function signalGroup(pgid: number, signal: NodeJS.Signals): boolean {
+  try {
+    process.kill(-pgid, signal);
+    return true;
+  } catch {
+    groups.delete(pgid);
+    return false;
+  }
+}
+
+export function killAllGroups(signal: NodeJS.Signals): void {
+  for (const pgid of groups) signalGroup(pgid, signal);
+}
+
+export function activeGroupCount(): number {
+  for (const pgid of groups) groupAlive(pgid);
+  return groups.size;
+}
 
 function parseTimes(text: string): { user: number; sys: number } | undefined {
   // bash `times`: the second line is the children's "user sys", e.g. "0m1.250s 0m0.031s".
@@ -39,11 +81,18 @@ function parseTimes(text: string): { user: number; sys: number } | undefined {
 
 /** Kills the whole process group: a dev server's children must not outlive it. */
 export function killTree(child: ChildProcess, signal: NodeJS.Signals = 'SIGTERM'): void {
-  if (child.pid === undefined || child.exitCode !== null) return;
+  if (child.pid === undefined) return;
+  // A tracked group can outlive its leader, so it is signalled by id regardless.
+  if (groups.has(child.pid) && signalGroup(child.pid, signal)) return;
+  if (child.exitCode !== null || child.signalCode !== null) return;
   try {
     process.kill(-child.pid, signal);
   } catch {
-    child.kill(signal);
+    try {
+      child.kill(signal);
+    } catch {
+      /* The child can exit between the group and child kill attempts. */
+    }
   }
 }
 
@@ -74,6 +123,7 @@ export function runTimed(exec: Exec): Promise<ExecResult> {
       detached: true,
       stdio: ['ignore', 'pipe', 'pipe', 'pipe'],
     });
+    registerGroup(child);
     const stdout = collect(child.stdout);
     const stderr = collect(child.stderr);
     const meta = collect(child.stdio[3] as Readable);
@@ -141,6 +191,7 @@ export function startBackground(command: string, cwd: string, env: Record<string
     detached: true,
     stdio: ['ignore', 'pipe', 'pipe'],
   });
+  registerGroup(child);
   let output = '';
   const append = (chunk: Buffer) => {
     output += chunk.toString();
@@ -153,14 +204,20 @@ export function startBackground(command: string, cwd: string, env: Record<string
     child,
     output: () => output,
     async stop() {
-      if (child.exitCode !== null || child.signalCode !== null) return;
-      const exited = new Promise<void>((done) => child.once('exit', () => done()));
+      // The group can outlive its leader (a server backgrounded by the shell), so wait for both.
+      const pgid = child.pid;
+      const running = () =>
+        (child.exitCode === null && child.signalCode === null) || (pgid !== undefined && groupAlive(pgid));
+      const settle = async (ms: number) => {
+        const deadline = Date.now() + ms;
+        while (running() && Date.now() < deadline) await new Promise((done) => setTimeout(done, 25));
+      };
+      if (!running()) return;
       killTree(child, 'SIGTERM');
-      const timeout = new Promise<'timeout'>((done) => setTimeout(() => done('timeout'), 5000).unref());
-      if ((await Promise.race([exited, timeout])) === 'timeout') {
-        killTree(child, 'SIGKILL');
-        await exited;
-      }
+      await settle(5000);
+      if (!running()) return;
+      killTree(child, 'SIGKILL');
+      await settle(5000);
     },
   };
 }

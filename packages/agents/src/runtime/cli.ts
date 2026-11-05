@@ -3,6 +3,7 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { RoleRuntime } from '@speedpatrol/core';
+import { registerGroup } from '@speedpatrol/probes';
 import { serveTools } from '../mcp-server.js';
 import type { EventSink, RoleOutcome, RoleTask, Runtime } from '../types.js';
 
@@ -119,6 +120,7 @@ export class CliRuntime implements Runtime {
         detached: true,
         stdio: ['pipe', 'pipe', 'pipe'],
       });
+      registerGroup(child);
       child.stdin.on('error', () => undefined);
       child.stdin.end(prompt);
       let stdout = '';

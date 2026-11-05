@@ -1,4 +1,4 @@
-export { cycle, measureMain, patrol } from './patrol.js';
+export { cycle, cycleSummary, measureMain, patrol } from './patrol.js';
 export { publish, syncGithub } from './publish.js';
 export { runAnalyst } from './roles/analyst.js';
 export { runOptimizer } from './roles/optimizer.js';

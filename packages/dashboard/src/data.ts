@@ -355,14 +355,14 @@ export class DashboardData {
   }
 
   async runs() {
-    const [runs, comparisons] = await Promise.all([this.store.listRuns(), this.store.listComparisons()]);
+    const [runs, comparisons, baselines] = await Promise.all([
+      this.store.listRuns(),
+      this.store.listComparisons(),
+      this.store.baselines(),
+    ]);
     // The oldest baseline of each machine has no earlier one to compare with.
     const first = new Map<string, string>();
-    for (const run of [...runs].sort((a, b) => a.startedAt.localeCompare(b.startedAt))) {
-      if (run.purpose === 'baseline' && !run.failed && !first.has(run.machine.fingerprint)) {
-        first.set(run.machine.fingerprint, run.id);
-      }
-    }
+    for (const entry of baselines) if (!first.has(entry.machine)) first.set(entry.machine, entry.runId);
     const byHead = new Map<string, Comparison>();
     for (const comparison of newestFirst(comparisons).reverse()) {
       for (const runId of comparison.head.runs) byHead.set(runId, comparison);
