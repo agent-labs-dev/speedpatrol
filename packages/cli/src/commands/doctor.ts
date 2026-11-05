@@ -74,7 +74,10 @@ export function programWords(command: string): ProgramWord[] {
   const cd: string[] = [];
   // After `cd ~`, `cd -` or `cd $DIR` the directory is known only at run time, so a path word cannot be checked.
   let cdUnknown = false;
+  let previous: Segment['next'] = ';';
   for (const segment of commandSegments(command)) {
+    const before = previous;
+    previous = segment.next;
     const parts = segment.text.split(/\s+/);
     const at = parts.findIndex((part) => !ASSIGNMENT.test(part));
     const word = parts[at];
@@ -87,10 +90,11 @@ export function programWords(command: string): ProgramWord[] {
       ...(cd.length ? { cd: [...cd] } : {}),
     });
     // A piped `cd` runs in a subshell and leaves the directory as it was.
-    if (word !== 'cd' || segment.next === '|') continue;
+    if (word !== 'cd' || segment.next === '|' || before === '|') continue;
     const target = parts[at + 1];
-    // After `cd dir || ...` the directory depends on whether the cd succeeded.
-    if (segment.next === '||') cdUnknown = true;
+    // After `cd dir || ...` the directory depends on whether the cd succeeded,
+    // and after `... && cd dir` or `... || cd dir` on whether the cd ran at all.
+    if (segment.next === '||' || before === '&&' || before === '||') cdUnknown = true;
     else if (target && parts.length === at + 2 && !EXPANSION.test(target) && !/^[-~]/.test(target)) cd.push(target);
     else cdUnknown = true;
   }
