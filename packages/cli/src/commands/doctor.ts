@@ -24,7 +24,7 @@ type ProgramWord = { word: string; checked: boolean; cd?: string[] };
 /** A segment and the operator that follows it: `&&`, `||`, `|`, or `;` (also a newline or the end). */
 type Segment = { text: string; next: '&&' | '||' | '|' | ';' };
 
-/** Splits a shell command line on `&&`, `||`, `;`, `|` and newlines outside quotes. */
+/** Splits a shell command line on `&&`, `||`, `;`, `|` and newlines outside quotes, dropping `#` comments. */
 function commandSegments(command: string): Segment[] {
   const segments: Segment[] = [];
   let start = 0;
@@ -42,6 +42,14 @@ function commandSegments(command: string): Segment[] {
     }
     if (char === '\\') {
       i++;
+      continue;
+    }
+    // A `#` that starts a word comments out the rest of the line.
+    if (char === '#' && (i === 0 || /[\s;&|]/.test(command[i - 1] ?? ''))) {
+      const end = command.indexOf('\n', i);
+      segments.push({ text: command.slice(start, i), next: ';' });
+      i = end === -1 ? command.length : end;
+      start = i + 1;
       continue;
     }
     if ((char === '&' || char === '|') && command[i + 1] === char) {
@@ -104,6 +112,7 @@ export function programWords(command: string): ProgramWord[] {
 type Step = {
   run: string;
   cwd?: string;
+  /** App commands get `app.env` under their own; a benchmark runs with its own env only, as the probes do. */
   env: Record<string, string>;
   /** How the doctor names the step that runs it. */
   usedBy: string;
@@ -117,7 +126,12 @@ function stepCommands(config: SpeedpatrolConfig, benchmarks: Benchmark[]): Step[
     ['teardown', config.app.teardown],
   ] as const) {
     commands.forEach((command, index) => {
-      steps.push({ run: command.run, cwd: command.cwd, env: command.env, usedBy: `app.${phase}[${index}]` });
+      steps.push({
+        run: command.run,
+        cwd: command.cwd,
+        env: { ...config.app.env, ...command.env },
+        usedBy: `app.${phase}[${index}]`,
+      });
     });
   }
   for (const benchmark of benchmarks) {
@@ -173,10 +187,7 @@ export async function doctor(cwd: string, log: (line: string) => void): Promise<
         SPEEDPATROL_SOURCE: loaded.source,
       };
       const stepEnv = Object.fromEntries(
-        Object.entries({ ...loaded.config.app.env, ...step.env }).map(([key, value]) => [
-          key,
-          interpolate(value, vars),
-        ]),
+        Object.entries(step.env).map(([key, value]) => [key, interpolate(value, vars)]),
       );
       const env: NodeJS.ProcessEnv = { ...process.env, ...stepEnv, SPEEDPATROL_SOURCE: loaded.source };
       // A `${NAME}` left in PATH comes from a setup capture, known only at run time.
