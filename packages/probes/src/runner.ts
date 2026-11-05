@@ -155,7 +155,12 @@ export async function measure(options: MeasureOptions): Promise<Run> {
   } finally {
     await app.stop();
   }
-  if (run.machine.load) run.machine.load.end = loadavg()[0] ?? 0;
+  if (run.machine.load) {
+    run.machine.load.end = loadavg()[0] ?? 0;
+    // A run that started quiet can end overloaded; one warning per run is enough.
+    const endLoad = loadWarning(run.machine);
+    if (endLoad && !highLoad) log(endLoad);
+  }
   run.finishedAt = new Date().toISOString();
   if (!run.failed && run.results.every((result) => Object.keys(result.metrics).length === 0)) {
     run.failed = 'Every benchmark failed.';

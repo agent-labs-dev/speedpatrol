@@ -204,14 +204,20 @@ export function startBackground(command: string, cwd: string, env: Record<string
     child,
     output: () => output,
     async stop() {
-      if (child.exitCode !== null || child.signalCode !== null) return;
-      const exited = new Promise<void>((done) => child.once('exit', () => done()));
+      // The group can outlive its leader (a server backgrounded by the shell), so wait for both.
+      const pgid = child.pid;
+      const running = () =>
+        (child.exitCode === null && child.signalCode === null) || (pgid !== undefined && groupAlive(pgid));
+      const settle = async (ms: number) => {
+        const deadline = Date.now() + ms;
+        while (running() && Date.now() < deadline) await new Promise((done) => setTimeout(done, 25));
+      };
+      if (!running()) return;
       killTree(child, 'SIGTERM');
-      const timeout = new Promise<'timeout'>((done) => setTimeout(() => done('timeout'), 5000).unref());
-      if ((await Promise.race([exited, timeout])) === 'timeout') {
-        killTree(child, 'SIGKILL');
-        await exited;
-      }
+      await settle(5000);
+      if (!running()) return;
+      killTree(child, 'SIGKILL');
+      await settle(5000);
     },
   };
 }

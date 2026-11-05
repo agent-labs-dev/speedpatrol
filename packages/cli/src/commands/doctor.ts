@@ -138,7 +138,7 @@ export async function doctor(cwd: string, log: (line: string) => void): Promise<
       const dir = step.cwd ? (isAbsolute(step.cwd) ? step.cwd : resolve(loaded.source, step.cwd)) : loaded.source;
       const env = { ...process.env, ...loaded.config.app.env, ...step.env };
       for (const { word, checked } of programWords(step.run)) {
-        const key = `${dir}\0${word}`;
+        const key = `${dir}\0${env.PATH ?? ''}\0${word}`;
         if (seen.has(key)) continue;
         seen.add(key);
         // A `${NAME}` cwd comes from a setup capture, known only at run time.
