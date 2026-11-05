@@ -2,7 +2,7 @@ import { execFile } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { isAbsolute, resolve } from 'node:path';
 import { promisify } from 'node:util';
-import { type Benchmark, loadConfig, type SpeedpatrolConfig } from '@speedpatrol/core';
+import { type Benchmark, interpolate, loadConfig, type SpeedpatrolConfig } from '@speedpatrol/core';
 
 const exec = promisify(execFile);
 
@@ -136,7 +136,21 @@ export async function doctor(cwd: string, log: (line: string) => void): Promise<
     const seen = new Set<string>();
     for (const step of stepCommands(loaded.config, loaded.benchmarks)) {
       const dir = step.cwd ? (isAbsolute(step.cwd) ? step.cwd : resolve(loaded.source, step.cwd)) : loaded.source;
-      const env = { ...process.env, ...loaded.config.app.env, ...step.env };
+      // The same variables and interpolation as AppSession and the probes use at run time.
+      const vars = {
+        ...Object.fromEntries(Object.entries(process.env).filter((entry): entry is [string, string] => !!entry[1])),
+        ...loaded.config.app.env,
+        SPEEDPATROL_SOURCE: loaded.source,
+      };
+      const stepEnv = Object.fromEntries(
+        Object.entries({ ...loaded.config.app.env, ...step.env }).map(([key, value]) => [
+          key,
+          interpolate(value, vars),
+        ]),
+      );
+      const env: NodeJS.ProcessEnv = { ...process.env, ...stepEnv, SPEEDPATROL_SOURCE: loaded.source };
+      // A `${NAME}` left in PATH comes from a setup capture, known only at run time.
+      const runtimePath = /\$\{[A-Za-z_][A-Za-z0-9_]*\}/.test(env.PATH ?? '');
       for (const { word, checked } of programWords(step.run)) {
         const key = `${dir}\0${env.PATH ?? ''}\0${word}`;
         if (seen.has(key)) continue;
@@ -144,6 +158,10 @@ export async function doctor(cwd: string, log: (line: string) => void): Promise<
         // A `${NAME}` cwd comes from a setup capture, known only at run time.
         if (!checked || step.cwd?.includes('$')) {
           log(`- ${word}: not checked, shell expansion`);
+          continue;
+        }
+        if (runtimePath) {
+          log(`- ${word}: not checked, PATH set at run time`);
           continue;
         }
         const path = await locate(word, dir, env);

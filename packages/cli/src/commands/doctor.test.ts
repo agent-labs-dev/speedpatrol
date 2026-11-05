@@ -1,5 +1,8 @@
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { programWords } from './doctor.js';
+import { doctor, programWords } from './doctor.js';
 
 describe('programWords', () => {
   it.each([
@@ -32,5 +35,32 @@ describe('programWords', () => {
     ],
   ])('%s', (command, expected) => {
     expect(programWords(command)).toEqual(expected);
+  });
+});
+
+describe('doctor', () => {
+  it('does not check a program whose PATH comes from a setup capture', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'doctor-capture-'));
+    try {
+      await mkdir(join(root, '.speedpatrol'));
+      await writeFile(
+        join(root, '.speedpatrol', 'speedpatrol.yml'),
+        JSON.stringify({
+          app: {
+            setup: [
+              { run: 'echo dir=/tmp', capture: { TOOL_DIR: 'dir=(.*)' } },
+              { run: 'captured-only-tool', env: { PATH: '${TOOL_DIR}:/usr/bin:/bin' } },
+            ],
+          },
+          agents: { scout: { enabled: false }, analyst: { enabled: false }, optimizer: { enabled: false } },
+        }),
+      );
+      const lines: string[] = [];
+      const ok = await doctor(root, (line) => lines.push(line));
+      expect(lines).toContain('- captured-only-tool: not checked, PATH set at run time');
+      expect(ok, lines.join('\n')).toBe(true);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
   });
 });
