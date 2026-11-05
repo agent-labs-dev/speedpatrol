@@ -1,10 +1,12 @@
 import { mkdir } from 'node:fs/promises';
+import { loadavg } from 'node:os';
 import { join, relative } from 'node:path';
 import {
   type Benchmark,
   type BenchmarkResult,
   hash,
   type LoadedConfig,
+  loadWarning,
   MeasureError,
   type MetricSeries,
   type MetricSpec,
@@ -129,6 +131,8 @@ export async function measure(options: MeasureOptions): Promise<Run> {
     benchmarksHash: benchmarksHash(benchmarks),
     results: [],
   };
+  const highLoad = loadWarning(run.machine);
+  if (highLoad) log(highLoad);
   const defaults = loaded.config.defaults;
   try {
     await app.start();
@@ -151,6 +155,7 @@ export async function measure(options: MeasureOptions): Promise<Run> {
   } finally {
     await app.stop();
   }
+  if (run.machine.load) run.machine.load.end = loadavg()[0] ?? 0;
   run.finishedAt = new Date().toISOString();
   if (!run.failed && run.results.every((result) => Object.keys(result.metrics).length === 0)) {
     run.failed = 'Every benchmark failed.';

@@ -15,6 +15,7 @@ export type MachineInfo = {
   cpus: number;
   memoryGb: number;
   node: string;
+  load?: { start: number; end?: number };
 };
 
 /** The code a run measured. */

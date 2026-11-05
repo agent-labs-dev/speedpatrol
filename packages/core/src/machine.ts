@@ -1,4 +1,4 @@
-import { arch, cpus, hostname, platform, totalmem } from 'node:os';
+import { arch, cpus, hostname, loadavg, platform, totalmem } from 'node:os';
 import { hash } from './ids.js';
 import type { MachineInfo } from './types/run.js';
 
@@ -17,9 +17,19 @@ export function machineInfo(): MachineInfo {
     cpus: cpu.length,
     memoryGb: Math.round(totalmem() / 1024 ** 3),
     node: process.versions.node,
+    load: { start: loadavg()[0] ?? 0 },
   };
   const fingerprint =
     process.env.SPEEDPATROL_MACHINE ||
     hash([info.platform, info.arch, info.cpuModel, info.cpus, info.memoryGb, info.node.split('.')[0]], 10);
   return { fingerprint, ...info };
+}
+
+/** Warns when the 1 minute load at the start or the end of a run exceeds the core count. */
+export function loadWarning(machine: MachineInfo): string | undefined {
+  if (!machine.load) return undefined;
+  const { start, end } = machine.load;
+  const [when, load] = end !== undefined && end > start ? ['end', end] : ['start', start];
+  if (load <= machine.cpus) return undefined;
+  return `Machine load ${load.toFixed(2)} on ${machine.cpus} cores at ${when}: timings are unreliable.`;
 }
