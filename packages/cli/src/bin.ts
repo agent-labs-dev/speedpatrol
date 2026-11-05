@@ -245,9 +245,9 @@ async function main(argv: Argv): Promise<number> {
   }
 }
 
-const argv = parseArgv(process.argv.slice(2));
-installSignalHandlers(argv);
 try {
+  const argv = parseArgv(process.argv.slice(2));
+  installSignalHandlers(argv);
   process.exitCode = await main(argv);
 } catch (error) {
   log(`speedpatrol: ${(error as Error).message}`);
