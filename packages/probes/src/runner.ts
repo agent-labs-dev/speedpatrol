@@ -162,8 +162,17 @@ export async function measure(options: MeasureOptions): Promise<Run> {
     if (endLoad && !highLoad) log(endLoad);
   }
   run.finishedAt = new Date().toISOString();
-  if (!run.failed && run.results.every((result) => Object.keys(result.metrics).length === 0)) {
-    run.failed = 'Every benchmark failed.';
+  if (!run.failed) {
+    const failedCritical = run.results.filter(
+      (result) => result.critical && !result.metrics[result.primary]?.values.length,
+    );
+    if (failedCritical.length) {
+      run.failed = failedCritical
+        .map((result) => `Critical benchmark ${result.benchmark} failed: ${result.errors[0] ?? 'no primary samples'}`)
+        .join('\n');
+    } else if (run.results.every((result) => Object.keys(result.metrics).length === 0)) {
+      run.failed = 'Every benchmark failed.';
+    }
   }
   await store.saveRun(run);
   return run;

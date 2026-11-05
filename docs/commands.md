@@ -17,6 +17,8 @@
 
 `speedpatrol --help` shows each option. Exit codes: 0 ok, 1 regression, 2 config error, 4 could not measure.
 
+A critical benchmark with no primary samples fails the run even if other benchmarks improve. `compare` exits 4 and names the failed benchmark and side instead of printing a comparison of an incomplete run. Such a run cannot become a baseline or verify an optimizer change. Non-critical missing benchmarks remain informational when another benchmark measured successfully.
+
 ## The patrol
 
 ```bash
