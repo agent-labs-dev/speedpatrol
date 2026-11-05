@@ -65,6 +65,13 @@ describe('programWords', () => {
         { word: 'node', checked: true },
       ],
     ],
+    [
+      'if true; then tool; fi',
+      [
+        { word: 'true', checked: true },
+        { word: 'tool', checked: true },
+      ],
+    ],
   ])('%s', (command, expected) => {
     expect(programWords(command)).toEqual(expected);
   });

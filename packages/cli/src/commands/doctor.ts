@@ -68,6 +68,10 @@ function commandSegments(command: string): Segment[] {
 }
 
 const ASSIGNMENT = /^[A-Za-z_][A-Za-z0-9_]*=/;
+/** Shell keywords that come before a command word, as in `if true; then tool; fi`. */
+const LEADING_KEYWORDS = new Set(['if', 'then', 'else', 'elif', 'while', 'until', 'do', '!']);
+/** Shell keywords that close a block and run nothing themselves. */
+const CLOSING_KEYWORDS = new Set(['fi', 'done']);
 /** Expansion, redirection, quoting and `{cmd}` templates: the word on disk is not the word in the config. */
 const EXPANSION = /[$`()<>{}"'\\]/;
 
@@ -87,9 +91,11 @@ export function programWords(command: string): ProgramWord[] {
     const before = previous;
     previous = segment.next;
     const parts = segment.text.split(/\s+/);
-    const at = parts.findIndex((part) => !ASSIGNMENT.test(part));
+    let keywords = 0;
+    while (LEADING_KEYWORDS.has(parts[keywords] ?? '')) keywords++;
+    const at = parts.findIndex((part, index) => index >= keywords && !ASSIGNMENT.test(part));
     const word = parts[at];
-    if (!word) continue;
+    if (!word || (at === keywords && CLOSING_KEYWORDS.has(word))) continue;
     // A leading `PATH=...` changes where the shell looks the word up.
     const inlinePath = parts.slice(0, at).some((part) => part.startsWith('PATH='));
     words.push({
@@ -102,7 +108,8 @@ export function programWords(command: string): ProgramWord[] {
     const target = parts[at + 1];
     // After `cd dir || ...` the directory depends on whether the cd succeeded,
     // and after `... && cd dir` or `... || cd dir` on whether the cd ran at all.
-    if (segment.next === '||' || before === '&&' || before === '||') cdUnknown = true;
+    // A `cd` inside a conditional or loop may not run at all.
+    if (segment.next === '||' || before === '&&' || before === '||' || keywords) cdUnknown = true;
     else if (target && parts.length === at + 2 && !EXPANSION.test(target) && !/^[-~]/.test(target)) cd.push(target);
     else cdUnknown = true;
   }
