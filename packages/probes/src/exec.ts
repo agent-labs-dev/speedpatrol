@@ -50,11 +50,14 @@ export function registerGroup(child: ChildProcess): void {
   child.once('exit', () => groupAlive(pgid));
 }
 
-function signalGroup(pgid: number, signal: NodeJS.Signals): void {
+/** Returns false where the group is gone or group signals are unsupported (Windows). */
+function signalGroup(pgid: number, signal: NodeJS.Signals): boolean {
   try {
     process.kill(-pgid, signal);
+    return true;
   } catch {
     groups.delete(pgid);
+    return false;
   }
 }
 
@@ -80,10 +83,7 @@ function parseTimes(text: string): { user: number; sys: number } | undefined {
 export function killTree(child: ChildProcess, signal: NodeJS.Signals = 'SIGTERM'): void {
   if (child.pid === undefined) return;
   // A tracked group can outlive its leader, so it is signalled by id regardless.
-  if (groups.has(child.pid)) {
-    signalGroup(child.pid, signal);
-    return;
-  }
+  if (groups.has(child.pid) && signalGroup(child.pid, signal)) return;
   if (child.exitCode !== null || child.signalCode !== null) return;
   try {
     process.kill(-child.pid, signal);
