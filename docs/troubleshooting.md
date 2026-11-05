@@ -1,12 +1,14 @@
 # Troubleshooting
 
-Start with `speedpatrol doctor`. It checks Node, git, the config, Chromium, the agent CLIs and `gh`. The exit codes are 0 ok, 1 regression, 2 config error, 4 measurement or agent failure.
+Start with `speedpatrol doctor`. It checks Node, git, the config, the tools your commands run, Chromium, the agent CLIs and `gh`. The exit codes are 0 ok, 1 regression, 2 config error, 4 measurement or agent failure.
 
 ## Setup and first runs
 
 **Exit 2 and a config error.** The config is checked before anything runs: an unknown `kind`, a missing field, or a duplicate benchmark id stops it. The message names the field.
 
 **Exit 4, "could not measure".** A setup command failed, the app never became ready, or a benchmark failed three iterations in a row with no success (it is broken, not slow). The output shows the last 20 lines of the failing setup command, with secrets redacted. Run the setup command by hand in the checkout to see the full error.
+
+**`✗ <tool>: missing (used by app.setup[0])`.** A command in `app.prepare`, `app.setup`, `app.teardown` or a benchmark runs a program that is not on `PATH`, or not on it in the step's `cwd` and `env`. Doctor resolves the program the way the step does, without running it. Install the tool, or set the step's `env.PATH`. A program word such as `$RUNNER` or `$(...)` is reported as not checked instead.
 
 **The second `run` shows no comparison.** `run` compares with the newest baseline of a *different* commit, measured on the same machine. Two runs of one commit do not compare. Commit a change and run again, or use `speedpatrol compare`. A run of a working tree with changes to tracked files is not recorded as a baseline; untracked files do not matter.
 
