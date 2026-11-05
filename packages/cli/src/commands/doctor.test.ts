@@ -34,6 +34,15 @@ describe('programWords', () => {
         { word: './tool', checked: true },
       ],
     ],
+    ['PATH=./tools:$PATH tool', [{ word: 'tool', checked: false }]],
+    [
+      'cd tools || exit 1; ./tool',
+      [
+        { word: 'cd', checked: true },
+        { word: 'exit', checked: true },
+        { word: './tool', checked: false },
+      ],
+    ],
     [
       'cd $DIR && ./tool && node x',
       [

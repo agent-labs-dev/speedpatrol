@@ -65,8 +65,9 @@ const EXPANSION = /[$`()<>{}"'\\]/;
 
 /**
  * Takes the program word of each segment and skips leading `NAME=value`
- * assignments. A word that a shell would expand (`$VAR`, a subshell) cannot
- * be looked up without running it, so it is reported as not checked.
+ * assignments. A word that a shell would expand (`$VAR`, a subshell), or
+ * that follows a `PATH=` assignment, cannot be looked up without running it,
+ * so it is reported as not checked.
  */
 export function programWords(command: string): ProgramWord[] {
   const words: ProgramWord[] = [];
@@ -78,15 +79,19 @@ export function programWords(command: string): ProgramWord[] {
     const at = parts.findIndex((part) => !ASSIGNMENT.test(part));
     const word = parts[at];
     if (!word) continue;
+    // A leading `PATH=...` changes where the shell looks the word up.
+    const inlinePath = parts.slice(0, at).some((part) => part.startsWith('PATH='));
     words.push({
       word,
-      checked: !EXPANSION.test(word) && !(cdUnknown && word.includes('/')),
+      checked: !EXPANSION.test(word) && !inlinePath && !(cdUnknown && word.includes('/')),
       ...(cd.length ? { cd: [...cd] } : {}),
     });
-    // A `cd` piped or followed by `||` leaves the next segment in the directory it started in.
-    if (word !== 'cd' || segment.next === '|' || segment.next === '||') continue;
+    // A piped `cd` runs in a subshell and leaves the directory as it was.
+    if (word !== 'cd' || segment.next === '|') continue;
     const target = parts[at + 1];
-    if (target && parts.length === at + 2 && !EXPANSION.test(target) && !/^[-~]/.test(target)) cd.push(target);
+    // After `cd dir || ...` the directory depends on whether the cd succeeded.
+    if (segment.next === '||') cdUnknown = true;
+    else if (target && parts.length === at + 2 && !EXPANSION.test(target) && !/^[-~]/.test(target)) cd.push(target);
     else cdUnknown = true;
   }
   return words;
