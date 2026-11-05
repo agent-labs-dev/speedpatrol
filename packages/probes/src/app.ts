@@ -1,6 +1,9 @@
 import { isAbsolute, resolve } from 'node:path';
+import { setTimeout as sleep } from 'node:timers/promises';
 import { type AppCommand, interpolate, MeasureError, redact } from '@speedpatrol/core';
 import { type Background, runTimed, startBackground, urlAnswers, waitUntil } from './exec.js';
+
+const activeSessions = new Set<AppSession>();
 
 export type AppOptions = {
   setup: AppCommand[];
@@ -21,6 +24,7 @@ export type AppOptions = {
 export class AppSession {
   readonly vars: Record<string, string>;
   private readonly background: Background[] = [];
+  private stopPromise?: Promise<void>;
 
   constructor(private readonly options: AppOptions) {
     this.vars = {
@@ -45,6 +49,7 @@ export class AppSession {
   }
 
   async start(): Promise<void> {
+    activeSessions.add(this);
     for (const command of this.options.setup) await this.runCommand(command, 'setup');
   }
 
@@ -109,14 +114,27 @@ export class AppSession {
   }
 
   async stop(): Promise<void> {
-    for (const command of this.options.teardown) {
-      try {
-        await this.runCommand(command, 'teardown');
-      } catch (error) {
-        this.say(`teardown failed: ${(error as Error).message}`);
+    if (this.stopPromise) return this.stopPromise;
+    this.stopPromise = (async () => {
+      for (const command of this.options.teardown) {
+        try {
+          await this.runCommand(command, 'teardown');
+        } catch (error) {
+          this.say(`teardown failed: ${(error as Error).message}`);
+        }
       }
-    }
-    for (const process of this.background.reverse()) await process.stop();
-    this.background.length = 0;
+      for (const process of this.background.reverse()) await process.stop();
+      this.background.length = 0;
+    })().finally(() => {
+      activeSessions.delete(this);
+    });
+    return this.stopPromise;
   }
+}
+
+export async function stopActiveSessions(graceMs: number): Promise<void> {
+  await Promise.race([
+    Promise.allSettled([...activeSessions].map((session) => session.stop())),
+    sleep(graceMs, undefined, { ref: false }),
+  ]);
 }
