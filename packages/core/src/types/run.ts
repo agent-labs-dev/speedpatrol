@@ -70,6 +70,6 @@ export type Run = {
   /** Hash of the measured benchmark definitions. A change resets comparability. */
   benchmarksHash: string;
   results: BenchmarkResult[];
-  /** The app did not come up, or every benchmark failed. */
+  /** The app did not come up, a critical benchmark has no primary samples, or every benchmark failed. */
   failed?: string;
 };

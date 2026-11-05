@@ -38,7 +38,7 @@ The checkout needs the base branch: use `fetch-depth: 0`. A `web` or `electron` 
 
 To run the same comparison on your machine, use `speedpatrol compare --pr <number>`.
 
-Exit codes: 0 no regression, 1 regression (with `fail-on-regression`), 2 config error, 4 could not measure (the app did not start).
+Exit codes: 0 no regression, 1 regression (with `fail-on-regression`), 2 config error, 4 could not measure (the app did not start, a critical benchmark had no primary samples, or every benchmark failed).
 
 ## Noise on shared runners
 
