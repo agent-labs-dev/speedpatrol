@@ -2,9 +2,10 @@
 import { readFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { cycle, patrol, publish, runAnalyst, runOptimizer, runScout } from '@speedpatrol/agents';
+import { cycle, cycleSummary, patrol, publish, runAnalyst, runOptimizer, runScout } from '@speedpatrol/agents';
 import { ConfigError, EXIT, loadConfig, MeasureError, Store, sourceInfo } from '@speedpatrol/core';
 import { startDashboard } from '@speedpatrol/dashboard';
+import { activeGroupCount, killAllGroups, stopActiveSessions } from '@speedpatrol/probes';
 import { comparisonMarkdown, formatPct } from '@speedpatrol/stats';
 import { type Argv, intFlag, parseArgv, strFlag } from './argv.js';
 import { doctor } from './commands/doctor.js';
@@ -27,6 +28,39 @@ function version(): string {
 
 const log = (line: string) => process.stderr.write(`${line}\n`);
 const out = (line: string) => process.stdout.write(`${line}\n`);
+
+const SIGNAL_EXIT = { SIGHUP: 1, SIGINT: 2, SIGTERM: 15 } as const;
+type HandledSignal = keyof typeof SIGNAL_EXIT;
+
+let shuttingDown = false;
+
+/** Stops app sessions, then every tracked process group, and exits as the signal would. */
+function shutdown(signal: HandledSignal): void {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  void (async () => {
+    try {
+      await stopActiveSessions(5000);
+      killAllGroups('SIGTERM');
+      const deadline = Date.now() + 2000;
+      while (activeGroupCount() > 0 && Date.now() < deadline) {
+        await new Promise((done) => setTimeout(done, Math.min(50, deadline - Date.now())));
+      }
+      killAllGroups('SIGKILL');
+    } finally {
+      process.exit(128 + SIGNAL_EXIT[signal]);
+    }
+  })();
+}
+
+function installSignalHandlers(argv: Argv): void {
+  process.on('SIGTERM', () => shutdown('SIGTERM'));
+  process.on('SIGHUP', () => shutdown('SIGHUP'));
+  const genericSigint = argv.command !== 'dashboard' && !(argv.command === 'patrol' && !argv.flags.once);
+  if (genericSigint) process.on('SIGINT', () => shutdown('SIGINT'));
+  // SIGKILL of speedpatrol itself, such as timeout -s KILL or -k, cannot be caught.
+  process.on('exit', () => killAllGroups('SIGKILL'));
+}
 
 async function load(cwd: string) {
   const loaded = await loadConfig(cwd);
@@ -52,19 +86,21 @@ async function main(argv: Argv): Promise<number> {
       return (await doctor(cwd, out)) ? EXIT.ok : EXIT.config;
     case 'run': {
       const { loaded, store } = await load(cwd);
-      const { run, comparison } = await runCommand({
+      const result = await runCommand({
         loaded,
         store,
         only: positional,
         iterations: intFlag(flags, 'iterations'),
+        forceBaseline: Boolean(flags['force-baseline']),
         log,
       });
-      if (flags.json) out(JSON.stringify({ run, comparison }, null, 2));
+      const { run, comparison } = result;
+      if (flags.json) out(JSON.stringify(result, null, 2));
       else {
         out(
           `Run ${run.id} at ${run.source.sha.slice(0, 10)}${run.source.dirty ? ' (dirty)' : ''} on ${run.machine.fingerprint}`,
         );
-        out(runTable(run));
+        out(runTable(run, loaded.config.thresholds));
         if (comparison) out(`\n${comparisonMarkdown(comparison)}`);
       }
       if (run.failed) {
@@ -178,22 +214,28 @@ async function main(argv: Argv): Promise<number> {
           loaded,
           store,
           force: Boolean(flags.force),
+          forceBaseline: Boolean(flags['force-baseline']),
           optimize: flags.optimize !== false,
           log,
         });
         out(
           result.skipped
             ? `No new commit on ${loaded.config.agents.patrol.pull}.`
-            : `Measured ${result.sha.slice(0, 10)}: ${result.comparison?.verdict ?? 'first baseline'}; ${result.confirmed.length} confirmed regression(s).`,
+            : `${cycleSummary(result)}; ${result.confirmed.length} confirmed regression(s).`,
         );
         return EXIT.ok;
       }
       const controller = new AbortController();
-      process.once('SIGINT', () => controller.abort());
+      // The first Ctrl-C ends the patrol after this cycle; a second one stops it now.
+      process.on('SIGINT', () => {
+        if (controller.signal.aborted) shutdown('SIGINT');
+        else controller.abort();
+      });
       await patrol({
         loaded,
         store,
         force: Boolean(flags.force),
+        forceBaseline: Boolean(flags['force-baseline']),
         optimize: flags.optimize !== false,
         log,
         signal: controller.signal,
@@ -203,8 +245,10 @@ async function main(argv: Argv): Promise<number> {
   }
 }
 
+const argv = parseArgv(process.argv.slice(2));
+installSignalHandlers(argv);
 try {
-  process.exitCode = await main(parseArgv(process.argv.slice(2)));
+  process.exitCode = await main(argv);
 } catch (error) {
   log(`speedpatrol: ${(error as Error).message}`);
   process.exitCode =

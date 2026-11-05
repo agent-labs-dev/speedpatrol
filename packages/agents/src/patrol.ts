@@ -23,6 +23,8 @@ export type CycleOptions = {
   loaded: LoadedConfig;
   store: Store;
   force?: boolean;
+  /** Records a run as the baseline even under machine load or a noisy metric. */
+  forceBaseline?: boolean;
   /** false skips the optimizer this cycle, so a caller can run `optimize` as its own step. */
   optimize?: boolean;
   log: (line: string) => void;
@@ -33,9 +35,19 @@ export type CycleResult = {
   skipped: boolean;
   run?: Run;
   comparison?: Comparison;
+  comparisonSkipped?: string;
+  refused?: string;
   confirmed: Regression[];
   fixed: Regression[];
 };
+
+/** One line on what a cycle measured, shared by the runner status and `--once`. */
+export function cycleSummary(result: CycleResult): string {
+  if (result.skipped) return 'No new commit.';
+  const outcome = result.comparison?.verdict ?? result.comparisonSkipped ?? 'not compared';
+  const refused = result.refused ? `; not baselined: ${result.refused}` : '';
+  return `Measured ${result.sha.slice(0, 10)}: ${outcome}${refused}`;
+}
 
 /** The regressions that a second A/B measurement confirms (ADR 0001). */
 async function confirm(
@@ -116,10 +128,19 @@ export async function measureMain(options: CycleOptions): Promise<CycleResult> {
   await prepare(loaded, tree.dir, log);
   const run = await measure({ loaded, store, source: tree.dir, purpose: 'baseline', log });
   if (run.failed) throw new MeasureError(`The run failed: ${run.failed}`);
-  await recordBaseline(store, run);
-  const comparison = await compareWithBaseline(loaded, store, run);
+  const baseline = await recordBaseline(store, run, {
+    thresholds: loaded.config.thresholds,
+    force: Boolean(options.forceBaseline),
+  });
+  // A refused run is still compared and confirmed, and its commit is not measured again.
+  const refused = 'refused' in baseline ? baseline.refused : undefined;
+  if (refused) log(`Not recorded as a baseline: ${refused}`);
+  const compared = await compareWithBaseline(loaded, store, run);
   const confirmed: Regression[] = [];
-  if (comparison) {
+  let comparison: Comparison | undefined;
+  let comparisonSkipped: string | undefined;
+  if ('comparison' in compared) {
+    comparison = compared.comparison;
     log(`against ${comparison.base.sha.slice(0, 10)}: ${comparison.verdict}`);
     const { confirmation, benchmarks } = await confirm(loaded, store, comparison, tree.dir, log);
     const open = await store.listRegressions();
@@ -146,9 +167,11 @@ export async function measureMain(options: CycleOptions): Promise<CycleResult> {
       confirmed.push(regression);
     }
   } else {
-    log('first baseline on this machine: nothing to compare yet.');
+    comparisonSkipped = compared.skipped;
+    log(compared.skipped);
   }
-  const fixed = await markFixed(store, run, loaded);
+  // A refused run is too noisy or loaded to prove a regression gone.
+  const fixed = refused ? [] : await markFixed(store, run, loaded);
   await store.savePatrolState({
     ...state,
     lastSha: sha,
@@ -156,7 +179,7 @@ export async function measureMain(options: CycleOptions): Promise<CycleResult> {
     lastCycleAt: new Date().toISOString(),
     cycles: state.cycles + 1,
   });
-  return { sha, skipped: false, run, comparison, confirmed, fixed };
+  return { sha, skipped: false, run, comparison, comparisonSkipped, refused, confirmed, fixed };
 }
 
 /** Picks optimizer targets: critical first, then the least-tried benchmarks. */
@@ -194,9 +217,7 @@ export async function cycle(options: CycleOptions): Promise<CycleResult> {
     await store.setStatus({
       role: 'runner',
       state: 'done',
-      detail: result.skipped
-        ? 'No new commit.'
-        : `Measured ${result.sha.slice(0, 10)}: ${result.comparison?.verdict ?? 'first baseline'}`,
+      detail: cycleSummary(result),
     });
   } catch (error) {
     await store.setStatus({ role: 'runner', state: 'failed', detail: (error as Error).message.split('\n')[0]! });
@@ -211,7 +232,7 @@ export async function cycle(options: CycleOptions): Promise<CycleResult> {
     // Without an analyst the regression is still filed, with the numbers alone.
     for (const regression of result.confirmed) await store.saveRegression({ ...regression, status: 'filed' });
   }
-  if (agents.optimizer.enabled && options.optimize !== false && !result.skipped && result.run) {
+  if (agents.optimizer.enabled && options.optimize !== false && !result.skipped && !result.refused && result.run) {
     for (const benchmark of await pickTargets(options.loaded, store, agents.optimizer.maxPerCycle)) {
       const { experiment } = await runOptimizer({
         loaded: options.loaded,

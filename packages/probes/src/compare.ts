@@ -6,9 +6,11 @@ import {
   type Comparison,
   git,
   type LoadedConfig,
+  loadWarning,
   MeasureError,
   type Run,
   type Store,
+  type Thresholds,
   tryGit,
 } from '@speedpatrol/core';
 import { compareRuns } from '@speedpatrol/stats';
@@ -33,9 +35,35 @@ export async function prepare(loaded: LoadedConfig, source: string, log: (line: 
   }
 }
 
-/** Records a clean, complete run as the baseline of its commit. */
-export async function recordBaseline(store: Store, run: Run): Promise<BaselineEntry | undefined> {
-  if (run.failed || run.source.dirty || run.source.sha === 'unknown') return undefined;
+/**
+ * Records a clean, complete, quiet run as the baseline of its commit. `force`
+ * overrides machine load and a noisy metric, never a failed, dirty or
+ * unknown commit.
+ */
+export async function recordBaseline(
+  store: Store,
+  run: Run,
+  options: { thresholds: Thresholds; force: boolean },
+): Promise<{ entry: BaselineEntry } | { refused: string }> {
+  const fatal: string[] = [];
+  if (run.failed) fatal.push(`Run failed: ${run.failed}`);
+  if (run.source.dirty) fatal.push('Source is dirty.');
+  if (run.source.sha === 'unknown') fatal.push('Source SHA is unknown.');
+  if (fatal.length) return { refused: fatal.join(' ') };
+  const overridable: string[] = [];
+  const highLoad = loadWarning(run.machine);
+  if (highLoad) overridable.push(highLoad);
+  const { maxCv } = options.thresholds;
+  for (const result of run.results) {
+    // Only the primary metric gates: secondaries such as cpu_sys_ms are jittery at small values and would block
+    // every baseline. The run table still flags each noisy metric.
+    const series = result.metrics[result.primary];
+    if (!series || series.summary.cv <= maxCv) continue;
+    overridable.push(
+      `Benchmark ${result.benchmark}, metric ${result.primary}, cv ${(series.summary.cv * 100).toFixed(1)}%, above maxCv ${(maxCv * 100).toFixed(1)}%.`,
+    );
+  }
+  if (!options.force && overridable.length) return { refused: overridable.join(' ') };
   const entry: BaselineEntry = {
     sha: run.source.sha,
     runId: run.id,
@@ -46,26 +74,31 @@ export async function recordBaseline(store: Store, run: Run): Promise<BaselineEn
     at: run.finishedAt,
   };
   await store.addBaseline(entry);
-  return entry;
+  return { entry };
 }
 
 /**
  * Compares a run with the newest baseline of another commit on the same
- * machine. Returns undefined when there is no such baseline yet: the first
- * run of a project only creates one.
+ * machine. Returns a reason when there is no such baseline yet or its run is
+ * missing, so callers can explain why comparison did not happen.
  */
 export async function compareWithBaseline(
   loaded: LoadedConfig,
   store: Store,
   run: Run,
   against?: string,
-): Promise<Comparison | undefined> {
+): Promise<{ comparison: Comparison } | { skipped: string }> {
   const entry = against
     ? await store.baselineFor(against, run.machine.fingerprint)
     : await store.latestBaseline(run.machine.fingerprint, run.source.sha);
-  if (!entry) return undefined;
+  if (!entry) {
+    if (against) return { skipped: `No baseline for ${against} on this machine.` };
+    const recorded = (await store.baselines()).some((baseline) => baseline.runId === run.id);
+    const none = `No baseline from another commit on machine ${run.machine.fingerprint} yet`;
+    return { skipped: recorded ? `${none}: this run becomes the first.` : `${none}.` };
+  }
   const baseRun = await store.getRun(entry.runId);
-  if (!baseRun) return undefined;
+  if (!baseRun) return { skipped: `Baseline run ${entry.runId} is missing from the store.` };
   const comparison = compareRuns([baseRun], [run], {
     mode: 'baseline',
     thresholds: loaded.config.thresholds,
@@ -74,7 +107,7 @@ export async function compareWithBaseline(
     benchmarks: run.results.map((result) => result.benchmark),
   });
   await store.saveComparison(comparison);
-  return comparison;
+  return { comparison };
 }
 
 /**

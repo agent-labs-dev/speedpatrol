@@ -117,9 +117,10 @@ describe('agents over MCP', () => {
   it('a patrol baselines main, then confirms, explains and files a regression', async () => {
     const loaded = await loadConfig(repo);
     const store = new Store(loaded.dir);
-    const first = await cycle({ loaded, store, log: say });
+    // Forced: the baseline gate's load and noise reasons depend on the host, not on this fixture.
+    const first = await cycle({ loaded, store, forceBaseline: true, log: say });
     expect(first.comparison).toBeUndefined();
-    expect((await cycle({ loaded, store, log: say })).skipped).toBe(true);
+    expect((await cycle({ loaded, store, forceBaseline: true, log: say })).skipped).toBe(true);
 
     const work = join(repo, 'work.js');
     writeFileSync(work, readFileSync(work, 'utf8').replace('ROUNDS = 20000', 'ROUNDS = 2000000'));
@@ -138,7 +139,7 @@ describe('agents over MCP', () => {
       },
       { tool: 'finish', input: { summary: 'Explained.' } },
     ]);
-    const second = await cycle({ loaded, store, log: say });
+    const second = await cycle({ loaded, store, forceBaseline: true, log: say });
     expect(second.comparison?.verdict).toBe('regression');
     const confirmed = second.confirmed.map((r) => r.benchmark).sort();
     expect(confirmed).toContain('api.items');
@@ -204,7 +205,7 @@ describe('agents over MCP', () => {
     try {
       const result = spawnSync(
         process.execPath,
-        [resolve(import.meta.dirname, '../../cli/dist/bin.js'), command, '--force'],
+        [resolve(import.meta.dirname, '../../cli/dist/bin.js'), command, '--force', '--force-baseline'],
         {
           cwd: dir,
           encoding: 'utf8',

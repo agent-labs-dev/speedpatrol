@@ -5,11 +5,13 @@ Usage: speedpatrol [command] [options]
 Commands:
   (none), patrol         Measure origin/main on every new commit, confirm and explain
                          regressions, try speed-ups, publish. --once, --force,
-                         --no-optimize (measure and publish only)
+                         --force-baseline, --no-optimize (measure and publish only)
   init                   Create .speedpatrol/ with a config for this repo. --agent claude|codex|opencode
   run [ids|tags...]      Measure this checkout, record it as the baseline of its commit
                          when it is clean, and compare with the previous baseline.
-                         --iterations N, --json, --fail-on-regression
+                         --iterations N, --json, --fail-on-regression.
+                         --force-baseline Record this run as the baseline even when
+                         machine load or a noisy primary metric would refuse it.
   compare [ids|tags...]  A/B two checkouts on this machine: --base <ref> (default
                          origin/main), --head <dir|ref> (default: this checkout, with
                          its uncommitted changes), or --pr <number|url> (a GitHub pull
@@ -24,7 +26,8 @@ Commands:
   dashboard              Serve the dashboard. --port N (default 4321)
   baselines              List the recorded baselines.
   regressions            List regressions. 'regressions dismiss <id> --reason "..."'
-  doctor                 Check the config, git, Chromium and the agent CLIs.
+  doctor                 Check the config, git, the tools your commands run,
+                         Chromium and the agent CLIs.
 
 Options:
   --cwd <dir>            Run as if started in <dir>.

@@ -83,7 +83,10 @@ describe('measure and compare the fixture app', () => {
     expect(byId['cli.work']!.profile?.hotspots?.map((spot) => spot.function)).toContain('work');
     const web = byId['web.home']!.profile;
     expect(web?.kind).toBe('cpuprofile');
-    expect(await recordBaseline(store, run)).toMatchObject({ sha: run.source.sha });
+    // Forced: the gate's load and noise reasons depend on the host, not on this fixture.
+    expect(await recordBaseline(store, run, { thresholds: loaded.config.thresholds, force: true })).toMatchObject({
+      entry: { sha: run.source.sha },
+    });
   });
 
   it('flags a slower work() on the benchmarks that call it, and only those', async () => {
@@ -114,7 +117,10 @@ describe('measure and compare the fixture app', () => {
     // The baseline path finds the earlier commit's baseline on this machine.
     const run = await measure({ loaded, store, purpose: 'baseline', only: ['api.items'], iterations: 10 });
     const againstBaseline = await compareWithBaseline(loaded, store, run);
-    expect(againstBaseline?.base.sha).not.toBe(run.source.sha);
-    expect(againstBaseline?.metrics.find((metric) => metric.primary)?.verdict).toBe('regression');
+    expect('comparison' in againstBaseline).toBe(true);
+    if ('comparison' in againstBaseline) {
+      expect(againstBaseline.comparison.base.sha).not.toBe(run.source.sha);
+      expect(againstBaseline.comparison.metrics.find((metric) => metric.primary)?.verdict).toBe('regression');
+    }
   });
 });
