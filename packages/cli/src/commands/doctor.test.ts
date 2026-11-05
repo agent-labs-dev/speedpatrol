@@ -16,6 +16,29 @@ describe('programWords', () => {
       'cd sub && node server.js',
       [
         { word: 'cd', checked: true },
+        { word: 'node', checked: true, cd: ['sub'] },
+      ],
+    ],
+    [
+      'cd a; cd ../b && ./tool',
+      [
+        { word: 'cd', checked: true },
+        { word: 'cd', checked: true, cd: ['a'] },
+        { word: './tool', checked: true, cd: ['a', '../b'] },
+      ],
+    ],
+    [
+      'cd sub | ./tool',
+      [
+        { word: 'cd', checked: true },
+        { word: './tool', checked: true },
+      ],
+    ],
+    [
+      'cd $DIR && ./tool && node x',
+      [
+        { word: 'cd', checked: true },
+        { word: './tool', checked: false },
         { word: 'node', checked: true },
       ],
     ],
@@ -39,6 +62,28 @@ describe('programWords', () => {
 });
 
 describe('doctor', () => {
+  it('resolves a program in the directory an earlier `cd` moved into', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'doctor-cd-'));
+    try {
+      await mkdir(join(root, '.speedpatrol'));
+      await mkdir(join(root, 'tools'));
+      await writeFile(join(root, 'tools', 'review-tool'), '#!/bin/sh\nexit 0\n', { mode: 0o755 });
+      await writeFile(
+        join(root, '.speedpatrol', 'speedpatrol.yml'),
+        JSON.stringify({
+          app: { setup: [{ run: 'cd tools && ./review-tool' }] },
+          agents: { scout: { enabled: false }, analyst: { enabled: false }, optimizer: { enabled: false } },
+        }),
+      );
+      const lines: string[] = [];
+      const ok = await doctor(root, (line) => lines.push(line));
+      expect(lines).toContain(`✓ ./review-tool: ./review-tool`);
+      expect(ok, lines.join('\n')).toBe(true);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   it('does not check a program whose PATH comes from a setup capture', async () => {
     const root = await mkdtemp(join(tmpdir(), 'doctor-capture-'));
     try {

@@ -15,12 +15,18 @@ async function version(command: string, args = ['--version']): Promise<string | 
   }
 }
 
-/** A program word from a command line, and whether Speedpatrol can check it. */
-type ProgramWord = { word: string; checked: boolean };
+/**
+ * A program word from a command line, and whether Speedpatrol can check it.
+ * `cd` lists the directories an earlier `cd` in the same line moved into, in order.
+ */
+type ProgramWord = { word: string; checked: boolean; cd?: string[] };
+
+/** A segment and the operator that follows it: `&&`, `||`, `|`, or `;` (also a newline or the end). */
+type Segment = { text: string; next: '&&' | '||' | '|' | ';' };
 
 /** Splits a shell command line on `&&`, `||`, `;`, `|` and newlines outside quotes. */
-function commandSegments(command: string): string[] {
-  const segments: string[] = [];
+function commandSegments(command: string): Segment[] {
+  const segments: Segment[] = [];
   let start = 0;
   let quote: '"' | "'" | undefined;
   for (let i = 0; i < command.length; i++) {
@@ -39,18 +45,18 @@ function commandSegments(command: string): string[] {
       continue;
     }
     if ((char === '&' || char === '|') && command[i + 1] === char) {
-      segments.push(command.slice(start, i));
+      segments.push({ text: command.slice(start, i), next: char === '&' ? '&&' : '||' });
       start = i + 2;
       i++;
       continue;
     }
     if (char === ';' || char === '|' || char === '\n') {
-      segments.push(command.slice(start, i));
+      segments.push({ text: command.slice(start, i), next: char === '|' ? '|' : ';' });
       start = i + 1;
     }
   }
-  segments.push(command.slice(start));
-  return segments.map((segment) => segment.trim()).filter(Boolean);
+  segments.push({ text: command.slice(start), next: ';' });
+  return segments.map((segment) => ({ ...segment, text: segment.text.trim() })).filter((segment) => segment.text);
 }
 
 const ASSIGNMENT = /^[A-Za-z_][A-Za-z0-9_]*=/;
@@ -64,9 +70,24 @@ const EXPANSION = /[$`()<>{}"'\\]/;
  */
 export function programWords(command: string): ProgramWord[] {
   const words: ProgramWord[] = [];
+  const cd: string[] = [];
+  // After `cd ~`, `cd -` or `cd $DIR` the directory is known only at run time, so a path word cannot be checked.
+  let cdUnknown = false;
   for (const segment of commandSegments(command)) {
-    const word = segment.split(/\s+/).find((part) => !ASSIGNMENT.test(part));
-    if (word) words.push({ word, checked: !EXPANSION.test(word) });
+    const parts = segment.text.split(/\s+/);
+    const at = parts.findIndex((part) => !ASSIGNMENT.test(part));
+    const word = parts[at];
+    if (!word) continue;
+    words.push({
+      word,
+      checked: !EXPANSION.test(word) && !(cdUnknown && word.includes('/')),
+      ...(cd.length ? { cd: [...cd] } : {}),
+    });
+    // A `cd` piped or followed by `||` leaves the next segment in the directory it started in.
+    if (word !== 'cd' || segment.next === '|' || segment.next === '||') continue;
+    const target = parts[at + 1];
+    if (target && parts.length === at + 2 && !EXPANSION.test(target) && !/^[-~]/.test(target)) cd.push(target);
+    else cdUnknown = true;
   }
   return words;
 }
@@ -151,8 +172,9 @@ export async function doctor(cwd: string, log: (line: string) => void): Promise<
       const env: NodeJS.ProcessEnv = { ...process.env, ...stepEnv, SPEEDPATROL_SOURCE: loaded.source };
       // A `${NAME}` left in PATH comes from a setup capture, known only at run time.
       const runtimePath = /\$\{[A-Za-z_][A-Za-z0-9_]*\}/.test(env.PATH ?? '');
-      for (const { word, checked } of programWords(step.run)) {
-        const key = `${dir}\0${env.PATH ?? ''}\0${word}`;
+      for (const { word, checked, cd = [] } of programWords(step.run)) {
+        const wordDir = resolve(dir, ...cd);
+        const key = `${wordDir}\0${env.PATH ?? ''}\0${word}`;
         if (seen.has(key)) continue;
         seen.add(key);
         // A `${NAME}` cwd comes from a setup capture, known only at run time.
@@ -164,7 +186,7 @@ export async function doctor(cwd: string, log: (line: string) => void): Promise<
           log(`- ${word}: not checked, PATH set at run time`);
           continue;
         }
-        const path = await locate(word, dir, env);
+        const path = await locate(word, wordDir, env);
         if (path) log(`✓ ${word}: ${path}`);
         else {
           log(`✗ ${word}: missing (used by ${step.usedBy})`);
