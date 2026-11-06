@@ -1,6 +1,14 @@
 name: Release
 
+# A merge to main that raises packages/speedpatrol/package.json above the newest
+# v* tag publishes that version. This is the path automation takes: the
+# workspace GitHub App can merge a pull request but has no `actions: write`, so
+# its workflow_dispatch call is refused with 403. A maintainer can still run the
+# workflow by hand with a bump.
 on:
+  push:
+    branches: [main]
+    paths: [packages/speedpatrol/package.json]
   workflow_dispatch:
     inputs:
       bump:
@@ -18,8 +26,44 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  release:
+  version:
     if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    outputs:
+      value: ${{ steps.version.outputs.value }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      # The newest v* tag holds the last release. The main rules do not let
+      # this workflow push, so after a manual run the version on main can be
+      # older than the tag. An empty value means there is nothing to release.
+      - name: Choose version
+        id: version
+        working-directory: packages/speedpatrol
+        env:
+          BUMP: ${{ inputs.bump }}
+        run: |
+          last=$(git tag --list 'v*' --sort=-v:refname | head -n 1)
+          last=${last#v}
+          main=$(node -p "require('./package.json').version")
+          if [ "$GITHUB_EVENT_NAME" = workflow_dispatch ]; then
+            if [ -n "$last" ]; then
+              npm version "$last" --no-git-tag-version --allow-same-version
+            fi
+            npm version "$BUMP" --no-git-tag-version
+            version=$(node -p "require('./package.json').version")
+          elif [ -z "$last" ] || { [ "$main" != "$last" ] && [ "$(printf '%s\n' "$last" "$main" | sort -V | tail -n 1)" = "$main" ]; }; then
+            version=$main
+          else
+            echo "package.json is at $main and the last release is $last: nothing to release."
+            version=
+          fi
+          echo "value=$version" >> "$GITHUB_OUTPUT"
+
+  release:
+    needs: version
+    if: needs.version.outputs.value != ''
     runs-on: ubuntu-latest
     # Must match the environment on the npm trusted publisher; the environment
     # itself only allows deployments from main.
@@ -42,29 +86,19 @@ jobs:
       # The probe and agent tests drive real processes and a real Chromium.
       - run: pnpm --filter @speedpatrol/probes exec playwright install --with-deps chromium
       - run: pnpm test
-      - name: Bump package version
-        id: version
+      - name: Set package version
         working-directory: packages/speedpatrol
-        # The newest v* tag holds the last release. The main rules do not let
-        # this workflow push, so the version on main can be older than the tag.
-        run: |
-          last=$(git tag --list 'v*' --sort=-v:refname | head -n 1)
-          if [ -n "$last" ]; then
-            npm version "${last#v}" --no-git-tag-version --allow-same-version
-          fi
-          npm version ${{ inputs.bump }} --no-git-tag-version
-          version=$(node -p "require('./package.json').version")
-          echo "value=$version" >> "$GITHUB_OUTPUT"
+        run: npm version "${{ needs.version.outputs.value }}" --no-git-tag-version --allow-same-version
       # The Action on a release tag installs the speedpatrol of that release, so
       # the Action and the CLI always match. main keeps speedpatrol@latest.
       - name: Pin the Action to the new version
         run: |
-          sed -i 's/^    default: speedpatrol@latest$/    default: speedpatrol@${{ steps.version.outputs.value }}/' action.yml
-          grep -qx '    default: speedpatrol@${{ steps.version.outputs.value }}' action.yml
+          sed -i 's/^    default: speedpatrol@latest$/    default: speedpatrol@${{ needs.version.outputs.value }}/' action.yml
+          grep -qx '    default: speedpatrol@${{ needs.version.outputs.value }}' action.yml
       - run: pnpm --filter speedpatrol build
       - name: Smoke test package
         run: |
-          test "$(node packages/speedpatrol/dist/bin.js --version)" = "${{ steps.version.outputs.value }}"
+          test "$(node packages/speedpatrol/dist/bin.js --version)" = "${{ needs.version.outputs.value }}"
           node packages/speedpatrol/dist/bin.js --help
           (cd packages/speedpatrol && npm pack --dry-run)
       # No token: npm trusts this workflow through OIDC (id-token: write) and
@@ -77,7 +111,7 @@ jobs:
       # uses agent-labs-dev/speedpatrol@v0 gets new releases without an edit.
       - name: Commit and tag
         env:
-          VERSION: ${{ steps.version.outputs.value }}
+          VERSION: ${{ needs.version.outputs.value }}
         run: |
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
@@ -90,4 +124,4 @@ jobs:
       - name: Create GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "v${{ steps.version.outputs.value }}" --generate-notes
+        run: gh release create "v${{ needs.version.outputs.value }}" --generate-notes
