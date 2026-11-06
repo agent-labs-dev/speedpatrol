@@ -230,7 +230,7 @@ async function measureOne(benchmark: Benchmark, options: OneOptions): Promise<Be
         const artifact = await probe.profile(join(options.profileDir, benchmark.id));
         if (artifact) profile = { ...artifact, path: relative(options.storeRoot, artifact.path) };
       } catch (error) {
-        log(`${benchmark.id}: profile failed: ${(error as Error).message}`);
+        log(`${benchmark.id}: profile failed: ${redact((error as Error).message, app.secretValues)}`);
       }
     }
   } catch (error) {
