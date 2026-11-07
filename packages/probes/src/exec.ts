@@ -104,6 +104,13 @@ function collect(stream: Readable | null, limit = 4 * 1024 * 1024): { text: () =
   return { text: () => text };
 }
 
+/** The package manager launching Speedpatrol is not necessarily the app's. */
+function commandEnv(overrides?: Record<string, string>): NodeJS.ProcessEnv {
+  const env = { ...process.env };
+  delete env.npm_config_user_agent;
+  return { ...env, ...overrides };
+}
+
 /**
  * Runs one command under bash and times it. The wall clock starts right
  * before the spawn, so it includes the shell's own start (a few ms, the same
@@ -119,7 +126,7 @@ export function runTimed(exec: Exec): Promise<ExecResult> {
     const started = performance.now();
     const child = spawn('bash', ['-c', script], {
       cwd: exec.cwd,
-      env: { ...process.env, ...exec.env },
+      env: commandEnv(exec.env),
       detached: true,
       stdio: ['ignore', 'pipe', 'pipe', 'pipe'],
     });
@@ -187,7 +194,7 @@ export type Background = {
 export function startBackground(command: string, cwd: string, env: Record<string, string>): Background {
   const child = spawn('bash', ['-c', command], {
     cwd,
-    env: { ...process.env, ...env },
+    env: commandEnv(env),
     detached: true,
     stdio: ['ignore', 'pipe', 'pipe'],
   });

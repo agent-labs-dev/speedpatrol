@@ -169,3 +169,7 @@ The command prints `{"metrics": {"render_ms": 12.3, "fps": 58}}` (or the list fo
 `use` is a preset (`claude`, `codex`, `opencode`), a command (`{ runtime: cli, command: "..." }` with `{prompt}`, `{mcp}`, `{mcpUrl}`, `{workdir}`, `{timeoutSeconds}`), or a model (`{ runtime: model, via: openrouter | openai | anthropic | custom, model: "...", endpoint: "..." }`, keys from `OPENROUTER_API_KEY`, `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `SPEEDPATROL_MODEL_API_KEY`).
 
 Each role also takes `maxSteps` (60), `timeoutMinutes` (30) and `budgetUsd` (model runtime only). [Agent time limits](running-a-patrol.md#agent-time-limits) tells how to size them.
+
+### Package-manager environment
+
+Commands inherit the environment except `npm_config_user_agent`: that value describes the package manager that launched Speedpatrol (for example, `npx`), not the one preparing or running your app. Removing it lets a Bun command identify itself correctly. Other variables, including registry configuration and credentials, are preserved. An explicitly configured `env.npm_config_user_agent` still takes precedence.
