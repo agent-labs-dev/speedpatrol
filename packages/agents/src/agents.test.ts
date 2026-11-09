@@ -1,6 +1,6 @@
 import { execFileSync, spawnSync } from 'node:child_process';
 import { once } from 'node:events';
-import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -32,6 +32,7 @@ const AGENT = `{ runtime: cli, command: "node ${fakeAgent} {mcp}" }`;
  */
 describe('agents over MCP', () => {
   let repo: string;
+  let signingDir: string;
   const say = () => {};
   const script = (steps: unknown[]) => {
     process.env.FAKE_AGENT_SCRIPT = JSON.stringify(steps);
@@ -58,11 +59,21 @@ describe('agents over MCP', () => {
       .replace('PORT: "4390"', `PORT: "${address.port}"`);
     writeFileSync(configFile, config);
     gitIn(repo, 'init', '-q', '-b', 'main');
+    gitIn(repo, 'config', 'user.name', 'Speedpatrol test');
+    gitIn(repo, 'config', 'user.email', 't@t');
+    gitIn(repo, 'config', 'commit.gpgsign', 'false');
+    signingDir = mkdtempSync(join(tmpdir(), 'speedpatrol-signing-'));
+    const key = join(signingDir, 'key');
+    execFileSync('ssh-keygen', ['-q', '-t', 'ed25519', '-N', '', '-f', key]);
+    writeFileSync(join(signingDir, 'allowed_signers'), `t@t ${readFileSync(`${key}.pub`, 'utf8')}`);
+    gitIn(repo, 'config', 'gpg.format', 'ssh');
+    gitIn(repo, 'config', 'gpg.ssh.allowedSignersFile', join(signingDir, 'allowed_signers'));
     gitIn(repo, 'add', '-A');
     gitIn(repo, 'commit', '-q', '-m', 'fixture');
   });
   afterAll(() => {
     rmSync(repo, { recursive: true, force: true });
+    rmSync(signingDir, { recursive: true, force: true });
     delete process.env.FAKE_AGENT_SCRIPT;
   });
 
@@ -154,7 +165,7 @@ describe('agents over MCP', () => {
     expect(lines.join('\n')).toContain('ROUNDS went from 20000 to 2000000');
   });
 
-  it('the optimizer change is kept only when the A/B run shows the speed-up', async () => {
+  it('the optimizer rejects a change that does not speed up the benchmark', async () => {
     const loaded = await loadConfig(repo);
     const store = new Store(loaded.dir);
     const benchmark = loaded.benchmarks.find((b) => b.id === 'api.items')!;
@@ -174,19 +185,45 @@ describe('agents over MCP', () => {
     ]);
     const placebo = await runOptimizer({ loaded, store, benchmark, baseSha: head, log: say });
     expect(placebo.experiment.status, placebo.experiment.reason).toBe('rejected');
+  });
 
-    script([
-      { tool: 'get_target' },
-      { tool: 'set_hypothesis', input: { hypothesis: 'work() does 20x more rounds than it needs.' } },
-      { edit: { file: 'work.js', from: 'ROUNDS = 2000000', to: 'ROUNDS = 20000' } },
-      { tool: 'finish', input: { title: 'Restore the work rounds to 20000', summary: 'Restored ROUNDS to 20000.' } },
-    ]);
-    const real = await runOptimizer({ loaded, store, benchmark, baseSha: head, log: say });
-    expect(real.experiment.status, real.experiment.reason).toBe('improved');
-    expect(real.experiment.deltaPct).toBeLessThan(-0.05);
-    expect(gitIn(real.experiment.worktree, 'log', '-1', '--format=%s')).toBe(
-      'perf(api.items): restore the work rounds to 20000',
-    );
+  it.each([
+    { signing: false, missingKey: true },
+    { signing: true, missingKey: false },
+    { signing: true, missingKey: true },
+  ])('optimizer honors commit.gpgsign=$signing with missingKey=$missingKey', async ({ signing, missingKey }) => {
+    gitIn(repo, 'config', 'commit.gpgsign', String(signing));
+    gitIn(repo, 'config', 'user.signingkey', join(signingDir, missingKey ? 'missing' : 'key'));
+    try {
+      const loaded = await loadConfig(repo);
+      const store = new Store(loaded.dir);
+      const benchmark = loaded.benchmarks.find((b) => b.id === 'api.items')!;
+      const head = gitIn(repo, 'rev-parse', 'HEAD');
+      script([
+        { tool: 'get_target' },
+        { tool: 'set_hypothesis', input: { hypothesis: 'work() does 20x more rounds than it needs.' } },
+        { edit: { file: 'work.js', from: 'ROUNDS = 2000000', to: 'ROUNDS = 20000' } },
+        { tool: 'finish', input: { title: 'Restore the work rounds to 20000', summary: 'Restored ROUNDS to 20000.' } },
+      ]);
+      const real = await runOptimizer({ loaded, store, benchmark, baseSha: head, log: say });
+      if (signing && missingKey) {
+        expect(real.experiment.status, real.experiment.reason).toBe('failed');
+        expect(real.experiment.reason).toContain(join(signingDir, 'missing'));
+        expect(real.experiment.headSha).toBeUndefined();
+        expect(real.experiment.comparisonId).toBeUndefined();
+        expect(existsSync(real.experiment.worktree)).toBe(false);
+        return;
+      }
+      expect(real.experiment.status, real.experiment.reason).toBe('improved');
+      expect(real.experiment.deltaPct).toBeLessThan(-0.05);
+      expect(gitIn(real.experiment.worktree, 'log', '-1', '--format=%s')).toBe(
+        'perf(api.items): restore the work rounds to 20000',
+      );
+      expect(gitIn(real.experiment.worktree, 'log', '-1', '--format=%G?')).toBe(signing ? 'G' : 'N');
+      if (signing) gitIn(real.experiment.worktree, 'verify-commit', 'HEAD');
+    } finally {
+      gitIn(repo, 'config', 'commit.gpgsign', 'false');
+    }
   });
 
   it.each(['optimize', '--once'])('exits 4 when %s cannot complete the optimizer session', async (command) => {
