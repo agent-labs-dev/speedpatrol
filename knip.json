@@ -2,7 +2,8 @@
   "$schema": "https://unpkg.com/knip@6/schema.json",
   "workspaces": {
     "packages/agents": {
-      "entry": ["src/testing/fake-agent.mjs"]
+      "entry": ["src/testing/fake-agent.mjs"],
+      "ignoreBinaries": ["ssh-keygen"]
     },
     "packages/dashboard": {
       "entry": ["src/ui/app.js", "scripts/*.mjs"]
