@@ -95,6 +95,11 @@ export async function runOptimizer(options: {
     worktree,
     baseSha: options.baseSha,
   };
+  if (config.checks.length === 0 || config.allowedPaths.length === 0) {
+    return {
+      experiment: { ...experiment, status: 'rejected', reason: 'Optimizer checks and allowedPaths must be declared.' },
+    };
+  }
   const save = async (patch: Partial<Experiment>) => {
     experiment = { ...experiment, ...patch, updatedAt: now() };
     await store.saveExperiment(experiment);
