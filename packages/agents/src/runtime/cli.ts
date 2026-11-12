@@ -15,6 +15,8 @@ export function runCommand(command: string, cwd: string, timeout: number): Promi
     const child = spawn('sh', ['-c', command], { cwd, detached: true, stdio: 'ignore' });
     let timedOut = false;
     let settled = false;
+    let childExited = false;
+    let groupKilled = false;
     let killTimer: ReturnType<typeof setTimeout> | undefined;
     const finish = (error?: Error) => {
       if (settled) return;
@@ -40,17 +42,18 @@ export function runCommand(command: string, cwd: string, timeout: number): Promi
             return;
           }
         }
-        // The shell can exit after SIGTERM while a descendant survives. Give
-        // the group kill a short interval to reap that descendant before the
-        // caller continues and removes its worktree.
-        killTimer = setTimeout(() => finish(new Error(`timed out after ${timeout}ms`)), 100);
+        groupKilled = true;
+        if (childExited) finish(new Error(`timed out after ${timeout}ms`));
       }, 250);
     };
     const timer = setTimeout(terminate, timeout);
     child.once('error', finish);
     child.once('exit', (code) => {
-      if (timedOut) return;
-      else if (code === 0) finish();
+      childExited = true;
+      if (timedOut) {
+        if (groupKilled) finish(new Error(`timed out after ${timeout}ms`));
+        return;
+      } else if (code === 0) finish();
       else finish(new Error(`exit ${code}`));
     });
   });
