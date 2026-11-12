@@ -165,6 +165,43 @@ describe('agents over MCP', () => {
     expect(lines.join('\n')).toContain('ROUNDS went from 20000 to 2000000');
   });
 
+  it('uses optimizer admission from the measured commit', async () => {
+    const loaded = await loadConfig(repo);
+    loaded.config.agents.optimizer.enabled = true;
+    loaded.config.agents.analyst.enabled = false;
+    const store = new Store(loaded.dir);
+    const before = (await store.listExperiments()).map((item) => item.id);
+    script([{ tool: 'finish', input: { title: 'No change', summary: 'No change.' } }]);
+    await cycle({ loaded, store, force: true, forceBaseline: true, log: say });
+    expect((await store.listExperiments()).map((item) => item.id)).toEqual(before);
+  });
+
+  it.each(['printf "\\n// hook\\n" >> server.js\ngit add server.js', 'printf "\\n// hook\\n" >> work.js'])(
+    'rejects a repository hook that changes the validated candidate',
+    async (command) => {
+      const hook = resolve(repo, gitIn(repo, 'rev-parse', '--git-path', 'hooks/pre-commit'));
+      writeFileSync(hook, `#!/bin/sh\n${command}\n`, { mode: 0o755 });
+      try {
+        const loaded = await loadConfig(repo);
+        script([
+          { write: { file: 'work.js', text: `${readFileSync(join(repo, 'work.js'), 'utf8')}\n// candidate\n` } },
+          { tool: 'finish', input: { title: 'Change work rounds', summary: 'Change work rounds.' } },
+        ]);
+        const result = await runOptimizer({
+          loaded,
+          store: new Store(loaded.dir),
+          benchmark: loaded.benchmarks.find((item) => item.id === 'api.items')!,
+          baseSha: gitIn(repo, 'rev-parse', 'HEAD'),
+          log: say,
+        });
+        expect(result.experiment.status, result.experiment.reason).toBe('rejected');
+        expect(result.experiment.reason).toContain('Repository hooks modified');
+      } finally {
+        rmSync(hook);
+      }
+    },
+  );
+
   it('the optimizer rejects a change that does not speed up the benchmark', async () => {
     const loaded = await loadConfig(repo);
     const store = new Store(loaded.dir);

@@ -282,6 +282,13 @@ export async function runOptimizer(options: {
       '-m',
       `${experiment.summary ?? ''}\n\nProposed by the Speedpatrol optimizer.`,
     ]);
+    if (
+      (await git(worktree, ['status', '--porcelain'])) ||
+      (await git(worktree, ['diff', '--binary', options.baseSha, 'HEAD'])) !== beforeChecksDiff
+    ) {
+      await save({ status: 'rejected', reason: 'Repository hooks modified the validated experiment.' });
+      return { experiment };
+    }
     await save({ status: 'measuring', headSha: await git(worktree, ['rev-parse', 'HEAD']) });
     return await verify(loaded, store, experiment, base.dir, guard, save, log);
   } catch (error) {
