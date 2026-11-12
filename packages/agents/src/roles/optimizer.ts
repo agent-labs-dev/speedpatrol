@@ -200,7 +200,16 @@ export async function runOptimizer(options: {
       await save({ status: 'rejected', reason: 'The optimizer made no change.' });
       return { experiment };
     }
-    await git(worktree, ['add', '-A']);
+    const status = await git(worktree, ['status', '--porcelain']);
+    const untracked = status
+      .split('\n')
+      .filter((line) => line.startsWith('?? '))
+      .map((line) => line.slice(3));
+    if (untracked.length > 0) {
+      await save({ status: 'rejected', reason: `Untracked scratch files in experiment: ${untracked.join(', ')}` });
+      return { experiment };
+    }
+    await git(worktree, ['add', '--update']);
     // Supply a fallback identity only when the repo has none. Git controls signing.
     const identity = (await tryGit(worktree, ['config', 'user.email']))
       ? []
