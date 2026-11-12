@@ -295,6 +295,8 @@ export async function runOptimizer(options: {
       await save({ status: 'rejected', reason: 'Optimizer checks modified the experiment worktree.' });
       return { experiment };
     }
+    await git(loaded.source, ['worktree', 'remove', '--force', verificationDir]);
+    await git(loaded.source, ['worktree', 'add', '--detach', verificationDir, headSha]);
     return await verify(loaded, store, experiment, base.dir, verificationDir, guard, save, log);
   } catch (error) {
     await save({ status: 'failed', reason: (error as Error).message });

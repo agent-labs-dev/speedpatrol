@@ -217,6 +217,28 @@ describe('agents over MCP', () => {
     expect(result.experiment.comparisonId, result.experiment.reason).toBeDefined();
   });
 
+  it('discards ignored check outputs before measuring the candidate', async () => {
+    const loaded = await loadConfig(repo);
+    loaded.config.agents.optimizer.checks = ['printf artifact > agent-only.js'];
+    const candidate = `import { existsSync } from 'node:fs';\n${readFileSync(join(repo, 'work.js'), 'utf8')}`.replace(
+      'let x = 0;',
+      "if (existsSync(new URL('./agent-only.js', import.meta.url))) return 0; let x = 0;",
+    );
+    script([
+      { write: { file: 'work.js', text: candidate } },
+      { tool: 'finish', input: { title: 'Candidate', summary: 'Candidate.' } },
+    ]);
+    const result = await runOptimizer({
+      loaded,
+      store: new Store(loaded.dir),
+      benchmark: loaded.benchmarks.find((item) => item.id === 'api.items')!,
+      baseSha: gitIn(repo, 'rev-parse', 'HEAD'),
+      log: say,
+    });
+    expect(result.experiment.status, result.experiment.reason).toBe('rejected');
+    expect(result.experiment.comparisonId, result.experiment.reason).toBeDefined();
+  });
+
   it.each(['printf "\\n// hook\\n" >> server.js\ngit add server.js', 'printf "\\n// hook\\n" >> work.js'])(
     'rejects a repository hook that changes the validated candidate',
     async (command) => {
