@@ -106,6 +106,7 @@ export async function runOptimizer(options: {
   const guard = [benchmark.id, ...critical];
   try {
     await prepare(loaded, worktree, log);
+    const baselineTracked = new Set((await git(worktree, ['diff', '--name-only', 'HEAD'])).split('\n').filter(Boolean));
     const deadline = Date.now() + config.timeoutMinutes * 60_000;
     const remaining = () =>
       `Working time remaining: ${Math.max(0, (deadline - Date.now()) / 60_000).toFixed(1)} minutes.`;
@@ -207,6 +208,15 @@ export async function runOptimizer(options: {
       .map((line) => line.slice(3));
     if (untracked.length > 0) {
       await save({ status: 'rejected', reason: `Untracked scratch files in experiment: ${untracked.join(', ')}` });
+      return { experiment };
+    }
+    const changedTracked = new Set((await git(worktree, ['diff', '--name-only', 'HEAD'])).split('\n').filter(Boolean));
+    const unexpected = [...baselineTracked].filter((path) => !changedTracked.has(path));
+    if (unexpected.length > 0) {
+      await save({
+        status: 'rejected',
+        reason: `Pre-existing tracked files changed or removed: ${unexpected.join(', ')}`,
+      });
       return { experiment };
     }
     await git(worktree, ['add', '--update']);
