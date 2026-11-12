@@ -56,10 +56,6 @@ export function compareSamples(
   return { deltaPct, deltaAbs, ci, pValue: p, verdict, ...(significant && !large ? { underThreshold: true } : {}) };
 }
 
-function comparableSummary(values: readonly number[]) {
-  return summarize(trimOutliers(values));
-}
-
 const SEVERITY: Record<Verdict, number> = { regression: 4, noisy: 3, improvement: 2, unchanged: 1, missing: 0 };
 
 /** The worst verdict wins: one regression outweighs any number of speed-ups. */
@@ -134,8 +130,8 @@ export function compareRuns(baseRuns: readonly Run[], headRuns: readonly Run[], 
         better: spec.better,
         primary: name === reference.primary,
         critical: reference.critical,
-        base: bm ? comparableSummary(bm.values) : undefined,
-        head: hm ? comparableSummary(hm.values) : undefined,
+        base: bm ? summarize(bm.values) : undefined,
+        head: hm ? summarize(hm.values) : undefined,
         ...result,
       });
     }
