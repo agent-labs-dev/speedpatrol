@@ -176,9 +176,9 @@ describe('agents over MCP', () => {
       { tool: 'set_hypothesis', input: { hypothesis: 'A comment makes it faster.' } },
       {
         edit: {
-          file: 'server.js',
-          from: "import { work } from './work.js';",
-          to: "import { work } from './work.js'; // fast",
+          file: 'work.js',
+          from: 'ROUNDS = 2000000',
+          to: 'ROUNDS = 2000000 // fast',
         },
       },
       { tool: 'finish', input: { title: 'Add a comment to the server', summary: 'Added a comment.' } },
