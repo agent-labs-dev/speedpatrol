@@ -1,7 +1,6 @@
-import { execFile } from 'node:child_process';
+import { spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { relative } from 'node:path';
-import { promisify } from 'node:util';
 import {
   type Benchmark,
   type Comparison,
@@ -21,7 +20,23 @@ import { profileDiffText } from '../tools/measure.js';
 import { repoTools } from '../tools/repo.js';
 import { optionalStr, str, tool } from '../tools/schema.js';
 
-const runCheck = promisify(execFile);
+function runCheck(command: string, cwd: string, timeout: number): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const child = spawn('sh', ['-c', command], { cwd, detached: true, stdio: 'ignore' });
+    const timer = setTimeout(() => {
+      if (child.pid) process.kill(-child.pid, 'SIGTERM');
+      reject(new Error(`timed out after ${timeout}ms`));
+    }, timeout);
+    child.once('error', (error) => {
+      clearTimeout(timer);
+      reject(error);
+    });
+    child.once('exit', (code) => {
+      clearTimeout(timer);
+      code === 0 ? resolve() : reject(new Error(`exit ${code}`));
+    });
+  });
+}
 
 const SYSTEM = `You are the optimizer of Speedpatrol, a team of agents that keeps an app fast.
 You work in your own git worktree (the current directory), on a branch made for you. Your job: make one benchmark faster without making anything else slower, with a change a reviewer would merge.
@@ -243,7 +258,7 @@ export async function runOptimizer(options: {
     }
     for (const command of config.checks) {
       try {
-        await runCheck('sh', ['-c', command], { cwd: worktree, timeout: config.timeoutMinutes * 60_000 });
+        await runCheck(command, worktree, config.timeoutMinutes * 60_000);
       } catch (error) {
         await save({ status: 'rejected', reason: `Optimizer check failed: ${command}: ${(error as Error).message}` });
         return { experiment };
