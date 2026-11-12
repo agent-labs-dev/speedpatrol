@@ -99,15 +99,14 @@ export async function runOptimizer(options: {
     worktree,
     baseSha: options.baseSha,
   };
-  if (config.checks.length === 0 || config.allowedPaths.length === 0) {
-    return {
-      experiment: { ...experiment, status: 'rejected', reason: 'Optimizer checks and allowedPaths must be declared.' },
-    };
-  }
   const save = async (patch: Partial<Experiment>) => {
     experiment = { ...experiment, ...patch, updatedAt: now() };
     await store.saveExperiment(experiment);
   };
+  if (config.checks.length === 0 || config.allowedPaths.length === 0) {
+    await save({ status: 'rejected', reason: 'Optimizer checks and allowedPaths must be declared.' });
+    return { experiment };
+  }
   await save({});
   if (await tryGit(loaded.source, ['status', '--porcelain'])) {
     await save({ status: 'rejected', reason: 'The source checkout has uncommitted changes.' });
@@ -236,6 +235,10 @@ export async function runOptimizer(options: {
         await save({ status: 'rejected', reason: `Optimizer check failed: ${command}: ${(error as Error).message}` });
         return { experiment };
       }
+    }
+    if ((await git(worktree, ['status', '--porcelain'])) !== status) {
+      await save({ status: 'rejected', reason: 'Optimizer checks modified the experiment worktree.' });
+      return { experiment };
     }
     const unexpected = [...baselineTracked].filter((path) => !changedTracked.has(path));
     if (unexpected.length > 0) {
