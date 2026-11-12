@@ -1,4 +1,6 @@
+import { execFile } from 'node:child_process';
 import { existsSync } from 'node:fs';
+import { promisify } from 'node:util';
 import {
   type Benchmark,
   type Comparison,
@@ -17,6 +19,8 @@ import { readInstructions } from '../tools/benchmarks.js';
 import { profileDiffText } from '../tools/measure.js';
 import { repoTools } from '../tools/repo.js';
 import { optionalStr, str, tool } from '../tools/schema.js';
+
+const runCheck = promisify(execFile);
 
 const SYSTEM = `You are the optimizer of Speedpatrol, a team of agents that keeps an app fast.
 You work in your own git worktree (the current directory), on a branch made for you. Your job: make one benchmark faster without making anything else slower, with a change a reviewer would merge.
@@ -220,6 +224,19 @@ export async function runOptimizer(options: {
       return { experiment };
     }
     const changedTracked = new Set((await git(worktree, ['diff', '--name-only', 'HEAD'])).split('\n').filter(Boolean));
+    const invalidPaths = [...changedTracked].filter((path) => !config.allowedPaths.includes(path));
+    if (invalidPaths.length > 0) {
+      await save({ status: 'rejected', reason: `Changed paths are outside allowedPaths: ${invalidPaths.join(', ')}` });
+      return { experiment };
+    }
+    for (const command of config.checks) {
+      try {
+        await runCheck('sh', ['-c', command], { cwd: worktree, timeout: config.timeoutMinutes * 60_000 });
+      } catch (error) {
+        await save({ status: 'rejected', reason: `Optimizer check failed: ${command}: ${(error as Error).message}` });
+        return { experiment };
+      }
+    }
     const unexpected = [...baselineTracked].filter((path) => !changedTracked.has(path));
     if (unexpected.length > 0) {
       await save({
