@@ -100,6 +100,10 @@ export async function runOptimizer(options: {
     await store.saveExperiment(experiment);
   };
   await save({});
+  if (await tryGit(loaded.source, ['status', '--porcelain'])) {
+    await save({ status: 'rejected', reason: 'The source checkout has uncommitted changes.' });
+    return { experiment };
+  }
   await git(loaded.source, ['worktree', 'add', '-b', branch, worktree, options.baseSha]);
   const base = await checkout(loaded.source, store, options.baseSha);
   const critical = loaded.benchmarks.filter((b) => b.critical && b.id !== benchmark.id).map((b) => b.id);
