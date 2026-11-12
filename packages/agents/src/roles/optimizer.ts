@@ -1,5 +1,6 @@
 import { execFile } from 'node:child_process';
 import { existsSync } from 'node:fs';
+import { relative } from 'node:path';
 import { promisify } from 'node:util';
 import {
   type Benchmark,
@@ -107,7 +108,14 @@ export async function runOptimizer(options: {
     config.checks.length === 0 ||
     config.allowedPaths.length === 0 ||
     benchmark.measures.length === 0 ||
-    config.allowedPaths.some((path) => !benchmark.measures.includes(path) || benchmark.protectedPaths.includes(path))
+    config.allowedPaths.some(
+      (path) =>
+        !benchmark.measures.includes(path) ||
+        benchmark.protectedPaths.includes(path) ||
+        path.startsWith('/') ||
+        path.split('/').includes('..'),
+    ) ||
+    config.allowedPaths.includes(relative(loaded.source, `${loaded.dir}/speedpatrol.yml`))
   ) {
     await save({ status: 'rejected', reason: 'Optimizer checks and allowedPaths must be declared.' });
     return { experiment };
