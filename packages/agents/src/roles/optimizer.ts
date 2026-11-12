@@ -87,6 +87,7 @@ export async function runOptimizer(options: {
   const id = newId();
   const branch = `speedpatrol/speedup-${benchmark.id.replace(/[^a-z0-9-]+/g, '-')}-${id.slice(-4)}`;
   const worktree = store.path('worktrees', id);
+  const verificationDir = store.path('worktrees', `${id}-verify`);
   const now = () => new Date().toISOString();
   let experiment: Experiment = {
     id,
@@ -247,27 +248,7 @@ export async function runOptimizer(options: {
       await save({ status: 'rejected', reason: `Changed paths are outside allowedPaths: ${invalidPaths.join(', ')}` });
       return { experiment };
     }
-    const beforeChecksDiff = await git(worktree, ['diff', '--binary', 'HEAD']);
-    for (const command of config.checks) {
-      try {
-        const result = await runTimed({ command, cwd: worktree, timeoutMs: config.timeoutMinutes * 60_000 });
-        if (result.timedOut || result.code !== 0) {
-          throw new Error(
-            result.timedOut ? `timed out after ${config.timeoutMinutes * 60_000}ms` : `exit ${result.code}`,
-          );
-        }
-      } catch (error) {
-        await save({ status: 'rejected', reason: `Optimizer check failed: ${command}: ${(error as Error).message}` });
-        return { experiment };
-      }
-    }
-    if (
-      (await git(worktree, ['status', '--porcelain'])) !== status ||
-      (await git(worktree, ['diff', '--binary', 'HEAD'])) !== beforeChecksDiff
-    ) {
-      await save({ status: 'rejected', reason: 'Optimizer checks modified the experiment worktree.' });
-      return { experiment };
-    }
+    const candidateDiff = await git(worktree, ['diff', '--binary', 'HEAD']);
     await git(worktree, ['add', '--update']);
     // Supply a fallback identity only when the repo has none. Git controls signing.
     const identity = (await tryGit(worktree, ['config', 'user.email']))
@@ -284,17 +265,44 @@ export async function runOptimizer(options: {
     ]);
     if (
       (await git(worktree, ['status', '--porcelain'])) ||
-      (await git(worktree, ['diff', '--binary', options.baseSha, 'HEAD'])) !== beforeChecksDiff
+      (await git(worktree, ['diff', '--binary', options.baseSha, 'HEAD'])) !== candidateDiff
     ) {
       await save({ status: 'rejected', reason: 'Repository hooks modified the validated experiment.' });
       return { experiment };
     }
-    await save({ status: 'measuring', headSha: await git(worktree, ['rev-parse', 'HEAD']) });
-    return await verify(loaded, store, experiment, base.dir, guard, save, log);
+    const headSha = await git(worktree, ['rev-parse', 'HEAD']);
+    await save({ status: 'measuring', headSha });
+    await git(loaded.source, ['worktree', 'add', '--detach', verificationDir, headSha]);
+    await prepare(loaded, verificationDir, log);
+    if (await git(verificationDir, ['status', '--porcelain'])) {
+      await save({ status: 'rejected', reason: 'Preparation modified the committed verification checkout.' });
+      return { experiment };
+    }
+    for (const command of config.checks) {
+      try {
+        const result = await runTimed({ command, cwd: verificationDir, timeoutMs: config.timeoutMinutes * 60_000 });
+        if (result.timedOut || result.code !== 0) {
+          throw new Error(
+            result.timedOut ? `timed out after ${config.timeoutMinutes * 60_000}ms` : `exit ${result.code}`,
+          );
+        }
+      } catch (error) {
+        await save({ status: 'rejected', reason: `Optimizer check failed: ${command}: ${(error as Error).message}` });
+        return { experiment };
+      }
+    }
+    if (await git(verificationDir, ['status', '--porcelain'])) {
+      await save({ status: 'rejected', reason: 'Optimizer checks modified the experiment worktree.' });
+      return { experiment };
+    }
+    return await verify(loaded, store, experiment, base.dir, verificationDir, guard, save, log);
   } catch (error) {
     await save({ status: 'failed', reason: (error as Error).message });
     return { experiment };
   } finally {
+    if (existsSync(verificationDir)) {
+      await tryGit(loaded.source, ['worktree', 'remove', '--force', verificationDir]);
+    }
     // A rejected or failed experiment leaves nothing behind; an improved one
     // keeps its branch for the PR.
     if (experiment.status !== 'improved' && existsSync(worktree)) {
@@ -309,6 +317,7 @@ async function verify(
   store: Store,
   experiment: Experiment,
   baseDir: string,
+  headDir: string,
   guard: string[],
   save: (patch: Partial<Experiment>) => Promise<void>,
   log: (line: string) => void,
@@ -317,10 +326,18 @@ async function verify(
     loaded,
     store,
     base: { label: 'base', dir: baseDir },
-    head: { label: experiment.branch, dir: experiment.worktree },
+    head: { label: experiment.branch, dir: headDir },
     only: guard,
     log,
   });
+  if (await git(headDir, ['status', '--porcelain'])) {
+    await save({
+      status: 'rejected',
+      comparisonId: comparison.id,
+      reason: 'Verification modified the committed candidate.',
+    });
+    return { experiment, comparison };
+  }
   const primary = comparison.metrics.filter((metric) => metric.primary);
   const target = primary.find((metric) => metric.benchmark === experiment.target.benchmark);
   const collateral = primary

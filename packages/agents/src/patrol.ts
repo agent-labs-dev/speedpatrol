@@ -1,10 +1,11 @@
 import { existsSync } from 'node:fs';
 import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
-import { relative, sep } from 'node:path';
+import { join, relative, sep } from 'node:path';
 import {
   type Comparison,
   type LoadedConfig,
   loadConfig,
+  loadConfigDir,
   MeasureError,
   newId,
   type Regression,
@@ -106,9 +107,8 @@ async function markFixed(store: Store, run: Run, loaded: LoadedConfig): Promise<
 async function loadMeasuredConfig(loaded: LoadedConfig, dir: string): Promise<LoadedConfig> {
   const configPath = relative(loaded.source, loaded.dir);
   const externalConfig = configPath === '..' || configPath.startsWith(`..${sep}`);
-  return !externalConfig && existsSync(`${dir}/.speedpatrol/speedpatrol.yml`)
-    ? { ...(await loadConfig(dir)), dir: loaded.dir }
-    : { ...loaded, source: dir };
+  if (externalConfig) return { ...loaded, source: dir };
+  return { ...(await loadConfigDir(join(dir, configPath))), dir: loaded.dir };
 }
 
 /**

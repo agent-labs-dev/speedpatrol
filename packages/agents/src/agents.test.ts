@@ -46,7 +46,7 @@ describe('agents over MCP', () => {
     await new Promise<void>((done) => socket.close(() => done()));
     repo = mkdtempSync(join(tmpdir(), 'speedpatrol-agents-'));
     cpSync(fixture, repo, { recursive: true, filter: (path) => !path.includes('/.speedpatrol/runs') });
-    writeFileSync(join(repo, '.gitignore'), '.speedpatrol/runs/\n');
+    writeFileSync(join(repo, '.gitignore'), '.speedpatrol/runs/\nagent-only.js\n');
     const configFile = join(repo, '.speedpatrol/speedpatrol.yml');
     const config = readFileSync(configFile, 'utf8')
       .replace(/agents:[\s\S]*$/, '')
@@ -174,6 +174,47 @@ describe('agents over MCP', () => {
     script([{ tool: 'finish', input: { title: 'No change', summary: 'No change.' } }]);
     await cycle({ loaded, store, force: true, forceBaseline: true, log: say });
     expect((await store.listExperiments()).map((item) => item.id)).toEqual(before);
+  });
+
+  it('loads admission from a nested committed profile', async () => {
+    const nestedRepo = mkdtempSync(join(tmpdir(), 'speedpatrol-nested-'));
+    try {
+      gitIn(repo, 'clone', '--quiet', '--local', repo, nestedRepo);
+      mkdirSync(join(nestedRepo, 'config'));
+      gitIn(nestedRepo, 'mv', '.speedpatrol', 'config/.speedpatrol');
+      const configFile = join(nestedRepo, 'config/.speedpatrol/speedpatrol.yml');
+      writeFileSync(configFile, readFileSync(configFile, 'utf8').replace('source: .', 'source: ..'));
+      writeFileSync(join(nestedRepo, '.gitignore'), 'config/.speedpatrol/runs/\n');
+      gitIn(nestedRepo, 'add', '-A');
+      gitIn(nestedRepo, 'commit', '-q', '-m', 'nested profile');
+      const loaded = await loadConfig(join(nestedRepo, 'config'));
+      loaded.config.agents.optimizer.enabled = true;
+      loaded.config.agents.analyst.enabled = false;
+      const store = new Store(loaded.dir);
+      script([{ tool: 'finish', input: { title: 'No change', summary: 'No change.' } }]);
+      await cycle({ loaded, store, forceBaseline: true, log: say });
+      expect(await store.listExperiments()).toEqual([]);
+    } finally {
+      rmSync(nestedRepo, { recursive: true, force: true });
+    }
+  });
+
+  it('checks the committed candidate without ignored agent files', async () => {
+    const loaded = await loadConfig(repo);
+    loaded.config.agents.optimizer.checks = ['test ! -e agent-only.js'];
+    script([
+      { write: { file: 'agent-only.js', text: 'agent artifact' } },
+      { write: { file: 'work.js', text: `${readFileSync(join(repo, 'work.js'), 'utf8')}\n// candidate\n` } },
+      { tool: 'finish', input: { title: 'Candidate', summary: 'Candidate.' } },
+    ]);
+    const result = await runOptimizer({
+      loaded,
+      store: new Store(loaded.dir),
+      benchmark: loaded.benchmarks.find((item) => item.id === 'api.items')!,
+      baseSha: gitIn(repo, 'rev-parse', 'HEAD'),
+      log: say,
+    });
+    expect(result.experiment.comparisonId, result.experiment.reason).toBeDefined();
   });
 
   it.each(['printf "\\n// hook\\n" >> server.js\ngit add server.js', 'printf "\\n// hook\\n" >> work.js'])(
