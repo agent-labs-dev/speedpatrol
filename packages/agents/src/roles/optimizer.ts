@@ -11,9 +11,8 @@ import {
   type Store,
   tryGit,
 } from '@speedpatrol/core';
-import { abCompare, checkout, prepare } from '@speedpatrol/probes';
+import { abCompare, checkout, prepare, runTimed } from '@speedpatrol/probes';
 import { comparisonMarkdown, formatPct } from '@speedpatrol/stats';
-import { runCommand } from '../runtime/cli.js';
 import { runRole } from '../session.js';
 import { readInstructions } from '../tools/benchmarks.js';
 import { profileDiffText } from '../tools/measure.js';
@@ -240,7 +239,12 @@ export async function runOptimizer(options: {
     }
     for (const command of config.checks) {
       try {
-        await runCommand(command, worktree, config.timeoutMinutes * 60_000);
+        const result = await runTimed({ command, cwd: worktree, timeoutMs: config.timeoutMinutes * 60_000 });
+        if (result.timedOut || result.code !== 0) {
+          throw new Error(
+            result.timedOut ? `timed out after ${config.timeoutMinutes * 60_000}ms` : `exit ${result.code}`,
+          );
+        }
       } catch (error) {
         await save({ status: 'rejected', reason: `Optimizer check failed: ${command}: ${(error as Error).message}` });
         return { experiment };
