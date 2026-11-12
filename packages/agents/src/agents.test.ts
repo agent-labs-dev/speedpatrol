@@ -289,6 +289,7 @@ describe('agents over MCP', () => {
 
   it.each([
     ['a failed declared check', ['false'], 'Optimizer check failed', undefined],
+    ['a check that resets HEAD', ['git reset --hard HEAD~1'], 'Optimizer checks modified', undefined],
     ['an untracked scratch file', ['true'], 'Untracked scratch files', { file: 'scratch.tmp', text: 'scratch' }],
     [
       'a staged scratch file',

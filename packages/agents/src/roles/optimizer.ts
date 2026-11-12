@@ -274,7 +274,10 @@ export async function runOptimizer(options: {
     await save({ status: 'measuring', headSha });
     await git(loaded.source, ['worktree', 'add', '--detach', verificationDir, headSha]);
     await prepare(loaded, verificationDir, log);
-    if (await git(verificationDir, ['status', '--porcelain'])) {
+    if (
+      (await git(verificationDir, ['status', '--porcelain'])) ||
+      (await git(verificationDir, ['rev-parse', 'HEAD'])) !== headSha
+    ) {
       await save({ status: 'rejected', reason: 'Preparation modified the committed verification checkout.' });
       return { experiment };
     }
@@ -291,7 +294,10 @@ export async function runOptimizer(options: {
         return { experiment };
       }
     }
-    if (await git(verificationDir, ['status', '--porcelain'])) {
+    if (
+      (await git(verificationDir, ['status', '--porcelain'])) ||
+      (await git(verificationDir, ['rev-parse', 'HEAD'])) !== headSha
+    ) {
       await save({ status: 'rejected', reason: 'Optimizer checks modified the experiment worktree.' });
       return { experiment };
     }
@@ -332,7 +338,10 @@ async function verify(
     only: guard,
     log,
   });
-  if (await git(headDir, ['status', '--porcelain'])) {
+  if (
+    (await git(headDir, ['status', '--porcelain'])) ||
+    (await git(headDir, ['rev-parse', 'HEAD'])) !== experiment.headSha
+  ) {
     await save({
       status: 'rejected',
       comparisonId: comparison.id,
