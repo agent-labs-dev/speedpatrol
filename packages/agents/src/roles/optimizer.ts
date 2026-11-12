@@ -79,15 +79,12 @@ export async function runOptimizer(options: {
 }): Promise<OptimizerResult> {
   const { loaded, store, benchmark, log } = options;
   const config = loaded.config.agents.optimizer;
-  const protectedPaths = new Set(
-    loaded.benchmarks
-      .filter((item) => item.id === benchmark.id || item.critical)
-      .flatMap((item) => item.protectedPaths),
-  );
+  const protectedPaths = new Set(loaded.benchmarks.flatMap((item) => item.protectedPaths));
   const id = newId();
   const branch = `speedpatrol/speedup-${benchmark.id.replace(/[^a-z0-9-]+/g, '-')}-${id.slice(-4)}`;
   const worktree = store.path('worktrees', id);
   const verificationDir = store.path('worktrees', `${id}-verify`);
+  const verificationBaseDir = store.path('worktrees', `${id}-verify-base`);
   const now = () => new Date().toISOString();
   let experiment: Experiment = {
     id,
@@ -303,13 +300,14 @@ export async function runOptimizer(options: {
     }
     await git(loaded.source, ['worktree', 'remove', '--force', verificationDir]);
     await git(loaded.source, ['worktree', 'add', '--detach', verificationDir, headSha]);
-    return await verify(loaded, store, experiment, base.dir, verificationDir, guard, save, log);
+    await git(loaded.source, ['worktree', 'add', '--detach', verificationBaseDir, options.baseSha]);
+    return await verify(loaded, store, experiment, verificationBaseDir, verificationDir, guard, save, log);
   } catch (error) {
     await save({ status: 'failed', reason: (error as Error).message });
     return { experiment };
   } finally {
-    if (existsSync(verificationDir)) {
-      await tryGit(loaded.source, ['worktree', 'remove', '--force', verificationDir]);
+    for (const dir of [verificationDir, verificationBaseDir]) {
+      if (existsSync(dir)) await tryGit(loaded.source, ['worktree', 'remove', '--force', dir]);
     }
     // A rejected or failed experiment leaves nothing behind; an improved one
     // keeps its branch for the PR.
@@ -338,16 +336,18 @@ async function verify(
     only: guard,
     log,
   });
-  if (
-    (await git(headDir, ['status', '--porcelain'])) ||
-    (await git(headDir, ['rev-parse', 'HEAD'])) !== experiment.headSha
-  ) {
-    await save({
-      status: 'rejected',
-      comparisonId: comparison.id,
-      reason: 'Verification modified the committed candidate.',
-    });
-    return { experiment, comparison };
+  for (const [dir, sha] of [
+    [baseDir, experiment.baseSha],
+    [headDir, experiment.headSha],
+  ] as const) {
+    if ((await git(dir, ['status', '--porcelain'])) || (await git(dir, ['rev-parse', 'HEAD'])) !== sha) {
+      await save({
+        status: 'rejected',
+        comparisonId: comparison.id,
+        reason: 'Verification modified a committed checkout.',
+      });
+      return { experiment, comparison };
+    }
   }
   const primary = comparison.metrics.filter((metric) => metric.primary);
   const target = primary.find((metric) => metric.benchmark === experiment.target.benchmark);

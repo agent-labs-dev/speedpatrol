@@ -5,6 +5,7 @@ import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { loadConfig, Store } from '@speedpatrol/core';
+import { checkout } from '@speedpatrol/probes';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { cycle } from './patrol.js';
 import { publish } from './publish.js';
@@ -217,6 +218,43 @@ describe('agents over MCP', () => {
     expect(result.experiment.comparisonId, result.experiment.reason).toBeDefined();
   });
 
+  it('discards cached base artifacts before final measurement', async () => {
+    const loaded = await loadConfig(repo);
+    const store = new Store(loaded.dir);
+    const head = gitIn(repo, 'rev-parse', 'HEAD');
+    const base = await checkout(repo, store, head);
+    const artifact = join(base.dir, 'agent-only.js');
+    writeFileSync(artifact, 'cached artifact');
+    loaded.config.app.prepare = [
+      {
+        run: "if test -f agent-only.js; then sed -i 's/ROUNDS = 2000000/ROUNDS = 20000000/' work.js; fi",
+        env: {},
+        capture: {},
+        background: false,
+        timeoutMs: 10_000,
+      },
+    ];
+    try {
+      script([
+        { write: { file: 'work.js', text: `${readFileSync(join(repo, 'work.js'), 'utf8')}\n// candidate\n` } },
+        { tool: 'finish', input: { title: 'Candidate', summary: 'Candidate.' } },
+      ]);
+      const result = await runOptimizer({
+        loaded,
+        store,
+        benchmark: loaded.benchmarks.find((item) => item.id === 'api.items')!,
+        baseSha: head,
+        log: say,
+      });
+      expect(result.experiment.status, result.experiment.reason).toBe('rejected');
+      expect(result.experiment.comparisonId, result.experiment.reason).toBeDefined();
+      expect(readFileSync(join(base.dir, 'work.js'), 'utf8')).toBe(readFileSync(join(repo, 'work.js'), 'utf8'));
+    } finally {
+      gitIn(base.dir, 'reset', '--hard', head);
+      rmSync(artifact, { force: true });
+    }
+  });
+
   it('discards ignored check outputs before measuring the candidate', async () => {
     const loaded = await loadConfig(repo);
     loaded.config.agents.optimizer.checks = ['printf artifact > agent-only.js'];
@@ -357,10 +395,10 @@ describe('agents over MCP', () => {
     expect(result.experiment.reason).toContain('Preparation modified tracked files');
   });
 
-  it('rejects benchmark-only paths protected from optimizer changes', async () => {
+  it.each(['api.items', 'api.health'])('honors protected paths declared by %s', async (owner) => {
     const loaded = await loadConfig(repo);
     const benchmark = loaded.benchmarks.find((item) => item.id === 'api.items')!;
-    benchmark.protectedPaths = ['work.js'];
+    loaded.benchmarks.find((item) => item.id === owner)!.protectedPaths = ['work.js'];
     const result = await runOptimizer({
       loaded,
       store: new Store(loaded.dir),
