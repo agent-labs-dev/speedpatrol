@@ -103,7 +103,12 @@ export async function runOptimizer(options: {
     experiment = { ...experiment, ...patch, updatedAt: now() };
     await store.saveExperiment(experiment);
   };
-  if (config.checks.length === 0 || config.allowedPaths.length === 0) {
+  if (
+    config.checks.length === 0 ||
+    config.allowedPaths.length === 0 ||
+    benchmark.measures.length === 0 ||
+    config.allowedPaths.some((path) => !benchmark.measures.includes(path) || benchmark.protectedPaths.includes(path))
+  ) {
     await save({ status: 'rejected', reason: 'Optimizer checks and allowedPaths must be declared.' });
     return { experiment };
   }

@@ -54,6 +54,10 @@ const common = {
   /** The metric the verdict leads with. Default: the probe's own. */
   primary: z.string().optional(),
   profile: profileSchema,
+  /** Production files whose behavior this benchmark measures. */
+  measures: z.array(z.string().min(1)).default([]),
+  /** Benchmark and harness files that must never be optimized as production code. */
+  protectedPaths: z.array(z.string().min(1)).default([]),
 };
 
 const requestSchema = z.object({
