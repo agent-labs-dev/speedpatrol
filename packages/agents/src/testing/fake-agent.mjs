@@ -20,6 +20,11 @@ for (const step of steps) {
     log.push(`edited ${step.edit.file}`);
     continue;
   }
+  if (step.write) {
+    writeFileSync(step.write.file, step.write.text);
+    log.push(`wrote ${step.write.file}`);
+    continue;
+  }
   const result = await client.callTool({ name: step.tool, arguments: step.input ?? {} });
   const text = result.content.map((part) => part.text).join('\n');
   log.push(`${step.tool}: ${result.isError ? 'ERROR ' : ''}${text.split('\n')[0]}`);

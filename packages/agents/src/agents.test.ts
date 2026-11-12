@@ -188,6 +188,41 @@ describe('agents over MCP', () => {
   });
 
   it.each([
+    ['a failed declared check', ['false'], 'Optimizer check failed'],
+    ['an untracked scratch file', ['true'], 'Untracked scratch files'],
+  ])('rejects %s before acceptance', async (_label, checks, reason) => {
+    const loaded = await loadConfig(repo);
+    loaded.config.agents.optimizer.checks = checks;
+    const store = new Store(loaded.dir);
+    const benchmark = loaded.benchmarks.find((item) => item.id === 'api.items')!;
+    const head = gitIn(repo, 'rev-parse', 'HEAD');
+    script([
+      { tool: 'get_target' },
+      ...(reason.startsWith('Untracked') ? [{ write: { file: 'scratch.tmp', text: 'scratch' } }] : []),
+      { edit: { file: 'work.js', from: 'ROUNDS = 2000000', to: 'ROUNDS = 20000' } },
+      { tool: 'finish', input: { title: 'Change work rounds', summary: 'Change work rounds.' } },
+    ]);
+    const result = await runOptimizer({ loaded, store, benchmark, baseSha: head, log: say });
+    expect(result.experiment.status).toBe('rejected');
+    expect(result.experiment.reason).toContain(reason);
+  });
+
+  it('rejects benchmark-only paths protected from optimizer changes', async () => {
+    const loaded = await loadConfig(repo);
+    const benchmark = loaded.benchmarks.find((item) => item.id === 'api.items')!;
+    benchmark.protectedPaths = ['work.js'];
+    const result = await runOptimizer({
+      loaded,
+      store: new Store(loaded.dir),
+      benchmark,
+      baseSha: gitIn(repo, 'rev-parse', 'HEAD'),
+      log: say,
+    });
+    expect(result.experiment.status).toBe('rejected');
+    expect(result.experiment.reason).toContain('checks and allowedPaths');
+  });
+
+  it.each([
     { signing: false, missingKey: true },
     { signing: true, missingKey: false },
     { signing: true, missingKey: true },
