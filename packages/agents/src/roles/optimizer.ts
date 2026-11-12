@@ -79,6 +79,11 @@ export async function runOptimizer(options: {
 }): Promise<OptimizerResult> {
   const { loaded, store, benchmark, log } = options;
   const config = loaded.config.agents.optimizer;
+  const protectedPaths = new Set(
+    loaded.benchmarks
+      .filter((item) => item.id === benchmark.id || item.critical)
+      .flatMap((item) => item.protectedPaths),
+  );
   const id = newId();
   const branch = `speedpatrol/speedup-${benchmark.id.replace(/[^a-z0-9-]+/g, '-')}-${id.slice(-4)}`;
   const worktree = store.path('worktrees', id);
@@ -107,7 +112,7 @@ export async function runOptimizer(options: {
     config.allowedPaths.some(
       (path) =>
         !benchmark.measures.includes(path) ||
-        benchmark.protectedPaths.includes(path) ||
+        protectedPaths.has(path) ||
         path.startsWith('/') ||
         path.split('/').includes('..'),
     ) ||
@@ -237,6 +242,7 @@ export async function runOptimizer(options: {
       await save({ status: 'rejected', reason: `Changed paths are outside allowedPaths: ${invalidPaths.join(', ')}` });
       return { experiment };
     }
+    const beforeChecksDiff = await git(worktree, ['diff', '--binary', 'HEAD']);
     for (const command of config.checks) {
       try {
         const result = await runTimed({ command, cwd: worktree, timeoutMs: config.timeoutMinutes * 60_000 });
@@ -250,7 +256,10 @@ export async function runOptimizer(options: {
         return { experiment };
       }
     }
-    if ((await git(worktree, ['status', '--porcelain'])) !== status) {
+    if (
+      (await git(worktree, ['status', '--porcelain'])) !== status ||
+      (await git(worktree, ['diff', '--binary', 'HEAD'])) !== beforeChecksDiff
+    ) {
       await save({ status: 'rejected', reason: 'Optimizer checks modified the experiment worktree.' });
       return { experiment };
     }
