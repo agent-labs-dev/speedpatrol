@@ -51,7 +51,7 @@ describe('agents over MCP', () => {
     const config = readFileSync(configFile, 'utf8')
       .replace(/agents:[\s\S]*$/, '')
       .concat(
-        `agents:\n  scout: { use: ${AGENT} }\n  analyst: { use: ${AGENT} }\n  optimizer: { use: ${AGENT}, enabled: false, timeoutMinutes: 5, checks: ['true'], allowedPaths: ['src'] }\n  patrol: { pull: main }\n`,
+        `agents:\n  scout: { use: ${AGENT} }\n  analyst: { use: ${AGENT} }\n  optimizer: { use: ${AGENT}, enabled: false, timeoutMinutes: 5, checks: ['true'], allowedPaths: ['work.js'] }\n  patrol: { pull: main }\n`,
       )
       // Only the fast benchmarks: this test is about the agents, not the probes.
       .replace(/ {2}- id: web\.home[\s\S]*?(?= {2}- id: startup)/, '')
@@ -236,7 +236,7 @@ describe('agents over MCP', () => {
         .replace('source: .', `source: ${JSON.stringify(repo)}`)
         .replace(
           / {2}optimizer:.*\n/,
-          `  optimizer: { use: { runtime: cli, command: 'node -e "setTimeout(() => {}, 60000)"' }, enabled: true, timeoutMinutes: 0.005 }\n`,
+          `  optimizer: { use: { runtime: cli, command: 'node -e "setTimeout(() => {}, 60000)"' }, enabled: true, timeoutMinutes: 0.005, checks: ['true'], allowedPaths: ['work.js'] }\n`,
         ),
     );
     try {

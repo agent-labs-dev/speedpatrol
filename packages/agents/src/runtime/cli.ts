@@ -9,6 +9,53 @@ import type { EventSink, RoleOutcome, RoleTask, Runtime } from '../types.js';
 
 type CliUse = Extract<RoleRuntime, { runtime: 'cli' }>;
 
+/** Run a command in its own process group and reap the group on timeout. */
+export function runCommand(command: string, cwd: string, timeout: number): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const child = spawn('sh', ['-c', command], { cwd, detached: true, stdio: 'ignore' });
+    let timedOut = false;
+    let settled = false;
+    let killTimer: ReturnType<typeof setTimeout> | undefined;
+    const finish = (error?: Error) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      if (killTimer) clearTimeout(killTimer);
+      error ? reject(error) : resolve();
+    };
+    const terminate = () => {
+      timedOut = true;
+      if (!child.pid) return;
+      try {
+        process.kill(-child.pid, 'SIGTERM');
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'ESRCH') finish(error as Error);
+      }
+      killTimer = setTimeout(() => {
+        try {
+          process.kill(-child.pid!, 'SIGKILL');
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code !== 'ESRCH') {
+            finish(error as Error);
+            return;
+          }
+        }
+        // The shell can exit after SIGTERM while a descendant survives. Give
+        // the group kill a short interval to reap that descendant before the
+        // caller continues and removes its worktree.
+        killTimer = setTimeout(() => finish(new Error(`timed out after ${timeout}ms`)), 100);
+      }, 250);
+    };
+    const timer = setTimeout(terminate, timeout);
+    child.once('error', finish);
+    child.once('exit', (code) => {
+      if (timedOut) return;
+      else if (code === 0) finish();
+      else finish(new Error(`exit ${code}`));
+    });
+  });
+}
+
 function quote(value: string): string {
   return `'${value.replaceAll("'", "'\\''")}'`;
 }
