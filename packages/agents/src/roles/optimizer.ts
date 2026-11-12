@@ -132,7 +132,10 @@ export async function runOptimizer(options: {
   const guard = [benchmark.id, ...critical];
   try {
     await prepare(loaded, worktree, log);
-    const baselineTracked = new Set((await git(worktree, ['diff', '--name-only', 'HEAD'])).split('\n').filter(Boolean));
+    if (await git(worktree, ['diff', '--no-renames', '--name-only', 'HEAD'])) {
+      await save({ status: 'rejected', reason: 'Preparation modified tracked files before the optimizer started.' });
+      return { experiment };
+    }
     const deadline = Date.now() + config.timeoutMinutes * 60_000;
     const remaining = () =>
       `Working time remaining: ${Math.max(0, (deadline - Date.now()) / 60_000).toFixed(1)} minutes.`;
@@ -236,7 +239,9 @@ export async function runOptimizer(options: {
       await save({ status: 'rejected', reason: `Untracked scratch files in experiment: ${untracked.join(', ')}` });
       return { experiment };
     }
-    const changedTracked = new Set((await git(worktree, ['diff', '--name-only', 'HEAD'])).split('\n').filter(Boolean));
+    const changedTracked = new Set(
+      (await git(worktree, ['diff', '--no-renames', '--name-only', 'HEAD'])).split('\n').filter(Boolean),
+    );
     const invalidPaths = [...changedTracked].filter((path) => !config.allowedPaths.includes(path));
     if (invalidPaths.length > 0) {
       await save({ status: 'rejected', reason: `Changed paths are outside allowedPaths: ${invalidPaths.join(', ')}` });
@@ -261,14 +266,6 @@ export async function runOptimizer(options: {
       (await git(worktree, ['diff', '--binary', 'HEAD'])) !== beforeChecksDiff
     ) {
       await save({ status: 'rejected', reason: 'Optimizer checks modified the experiment worktree.' });
-      return { experiment };
-    }
-    const unexpected = [...baselineTracked].filter((path) => !changedTracked.has(path));
-    if (unexpected.length > 0) {
-      await save({
-        status: 'rejected',
-        reason: `Pre-existing tracked files changed or removed: ${unexpected.join(', ')}`,
-      });
       return { experiment };
     }
     await git(worktree, ['add', '--update']);

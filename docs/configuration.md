@@ -50,6 +50,8 @@ Optimizer publication must clear both `thresholds.relative` and `agents.optimize
 
 An enabled optimizer must declare `checks` and `allowedPaths`. Checks run in the experiment worktree before its change is committed, and any changed file outside `allowedPaths` rejects the experiment. Each allowed path must also appear in the benchmark's `measures` list and must not appear in its `protectedPaths` list. These declarations are fail-closed: they prevent a candidate from being accepted without an explicit validation command and measured production boundary.
 
+The source checkout must be clean, and preparation must leave tracked files unchanged. Untracked experiment files are rejected; staged additions must satisfy the same exact path policy as other changes. Checks must leave both the experiment's file status and diff unchanged.
+
 ## Benchmarks
 
 Every benchmark has:

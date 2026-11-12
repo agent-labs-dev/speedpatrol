@@ -3,6 +3,7 @@
 // FAKE_AGENT_SCRIPT, in order. `{"edit": {"file", "from", "to"}}` edits a file
 // in the working directory instead, the way an optimizer would. It prints the
 // result the way `claude -p --output-format json` does.
+import { execFileSync } from 'node:child_process';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
@@ -14,6 +15,10 @@ await client.connect(new StreamableHTTPClientTransport(new URL(config.mcpServers
 const { tools } = await client.listTools();
 const log = [`tools: ${tools.map((tool) => tool.name).join(',')}`];
 for (const step of steps) {
+  if (step.move) {
+    execFileSync('git', ['mv', '--', step.move.from, step.move.to]);
+    continue;
+  }
   if (step.edit) {
     const text = readFileSync(step.edit.file, 'utf8');
     writeFileSync(step.edit.file, text.replace(step.edit.from, step.edit.to));
@@ -22,6 +27,7 @@ for (const step of steps) {
   }
   if (step.write) {
     writeFileSync(step.write.file, step.write.text);
+    if (step.write.stage) execFileSync('git', ['add', '--', step.write.file]);
     log.push(`wrote ${step.write.file}`);
     continue;
   }
