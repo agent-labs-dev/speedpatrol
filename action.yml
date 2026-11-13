@@ -150,5 +150,9 @@ runs:
           echo "::notice::Speedpatrol found a regression, accepted by the '$LABEL' label."
           exit 0
         fi
-        echo "::error::Speedpatrol found a regression on a primary metric. If the cost is intended, add the '$LABEL' label and re-run this job."
+        if [ -n "$LABEL" ]; then
+          echo "::error::Speedpatrol found a regression on a primary metric. If the cost is intended, add the '$LABEL' label and re-run this job."
+        else
+          echo "::error::Speedpatrol found a regression on a primary metric."
+        fi
         exit 1
