@@ -21,6 +21,9 @@ inputs:
   fail-on-regression:
     description: Fail the job when a primary metric regressed.
     default: 'false'
+  accept-label:
+    description: A pull request label that accepts a regression as an intended cost, such as new tests in a timed suite. With it, a regression is still reported but does not fail the job. Empty turns acceptance off.
+    default: 'speedpatrol: accept'
   comment:
     description: Post the table on the pull request, and update it on each push.
     default: 'true'
@@ -105,6 +108,21 @@ runs:
         echo "verdict=$verdict" >> "$GITHUB_OUTPUT"
         cat "$RUNNER_TEMP/speedpatrol.md" >> "$GITHUB_STEP_SUMMARY"
 
+    # Read the labels now rather than from the event payload, so re-running the job after adding the label counts.
+    - name: Check for an accepted regression
+      id: accept
+      if: steps.compare.outputs.verdict == 'regression' && inputs.accept-label != '' && github.event.pull_request.number
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.github-token }}
+        PR: ${{ github.event.pull_request.number }}
+        LABEL: ${{ inputs.accept-label }}
+      run: |
+        if gh api "repos/$GITHUB_REPOSITORY/issues/$PR/labels" --paginate --jq '.[].name' | grep -Fxq -- "$LABEL"; then
+          echo "accepted=true" >> "$GITHUB_OUTPUT"
+          printf '\n**Accepted**: the `%s` label marks this regression as an intended cost.\n' "$LABEL" | tee -a "$GITHUB_STEP_SUMMARY" >> "$RUNNER_TEMP/speedpatrol.md"
+        fi
+
     - name: Comment on the pull request
       if: inputs.comment == 'true' && github.event.pull_request.number
       shell: bash
@@ -124,6 +142,13 @@ runs:
     - name: Fail on a regression
       if: inputs.fail-on-regression == 'true' && steps.compare.outputs.verdict == 'regression'
       shell: bash
+      env:
+        ACCEPTED: ${{ steps.accept.outputs.accepted }}
+        LABEL: ${{ inputs.accept-label }}
       run: |
-        echo "::error::Speedpatrol found a regression on a primary metric."
+        if [ "$ACCEPTED" = true ]; then
+          echo "::notice::Speedpatrol found a regression, accepted by the '$LABEL' label."
+          exit 0
+        fi
+        echo "::error::Speedpatrol found a regression on a primary metric. If the cost is intended, add the '$LABEL' label and re-run this job."
         exit 1

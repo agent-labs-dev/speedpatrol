@@ -29,12 +29,15 @@ jobs:
 | `rounds` | config | A/B rounds |
 | `iterations` | config | iterations per round |
 | `fail-on-regression` | `false` | fail the job when a primary metric regressed |
+| `accept-label` | `speedpatrol: accept` | a PR label that accepts a regression as an intended cost; empty turns it off |
 | `comment` | `true` | post the table on the PR |
 | `working-directory` | `.` | the folder that holds `.speedpatrol/` |
 | `package` | `speedpatrol@latest` | the npm package to run |
 | `node-version` | `22` | |
 
 The checkout needs the base branch: use `fetch-depth: 0`. A `web` or `electron` benchmark needs Chromium; the Action installs it when the config has one.
+
+Some regressions are the cost of the change itself: a suite timed as a whole gets slower when a pull request adds tests. Add the `accept-label` label to that pull request and re-run the job. The table and its comment still show the regression, marked as accepted, and the job passes. The label is read when the job runs, so a re-run after labelling is enough; add `labeled` to the workflow's `pull_request` types to re-run it automatically.
 
 To run the same comparison on your machine, use `speedpatrol compare --pr <number>`.
 
