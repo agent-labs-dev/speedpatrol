@@ -79,7 +79,7 @@ npx speedpatrol dashboard          # http://127.0.0.1:4321
 npx speedpatrol                    # the patrol: each new commit on origin/main
 ```
 
-After `init`, tell Speedpatrol how to install, build and start your app in `.speedpatrol/speedpatrol.yml`; [Getting started](docs/getting-started.md) covers that step. Exit codes: 0 ok, 1 regression, 2 config error, 4 could not measure.
+After `init`, tell Speedpatrol how to install, build and start your app in `.speedpatrol/speedpatrol.yml`; [Getting started](docs/getting-started.md) covers that step. Exit codes: 0 ok, 1 regression, 2 config error, 4 could not measure. `run` exits 0 on a regression unless you pass `--fail-on-regression`; `compare` always exits 1 on one.
 
 ## What it measures
 

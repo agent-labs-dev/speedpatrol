@@ -33,5 +33,6 @@ for (const file of await readdir(source, { withFileTypes: true })) {
   }
 }
 
-// Apache-2.0 redistribution requires the license and the notice.
-for (const file of ['LICENSE', 'NOTICE']) await copyFile(join(here, '../..', file), join(here, file));
+// Apache-2.0 redistribution requires the license and the notice. npm reads the
+// package page from a README next to package.json, and always packs it.
+for (const file of ['LICENSE', 'NOTICE', 'README.md']) await copyFile(join(here, '../..', file), join(here, file));
