@@ -5,6 +5,7 @@ import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { loadConfig, Store } from '@speedpatrol/core';
+import { checkout } from '@speedpatrol/probes';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { cycle } from './patrol.js';
 import { publish } from './publish.js';
@@ -46,12 +47,12 @@ describe('agents over MCP', () => {
     await new Promise<void>((done) => socket.close(() => done()));
     repo = mkdtempSync(join(tmpdir(), 'speedpatrol-agents-'));
     cpSync(fixture, repo, { recursive: true, filter: (path) => !path.includes('/.speedpatrol/runs') });
-    writeFileSync(join(repo, '.gitignore'), '.speedpatrol/runs/\n');
+    writeFileSync(join(repo, '.gitignore'), '.speedpatrol/runs/\nagent-only.js\n');
     const configFile = join(repo, '.speedpatrol/speedpatrol.yml');
     const config = readFileSync(configFile, 'utf8')
       .replace(/agents:[\s\S]*$/, '')
       .concat(
-        `agents:\n  scout: { use: ${AGENT} }\n  analyst: { use: ${AGENT} }\n  optimizer: { use: ${AGENT}, enabled: false, timeoutMinutes: 5 }\n  patrol: { pull: main }\n`,
+        `agents:\n  scout: { use: ${AGENT} }\n  analyst: { use: ${AGENT} }\n  optimizer: { use: ${AGENT}, enabled: false, timeoutMinutes: 5, checks: ['true'], allowedPaths: ['work.js'] }\n  patrol: { pull: main }\n`,
       )
       // Only the fast benchmarks: this test is about the agents, not the probes.
       .replace(/ {2}- id: web\.home[\s\S]*?(?= {2}- id: startup)/, '')
@@ -165,6 +166,143 @@ describe('agents over MCP', () => {
     expect(lines.join('\n')).toContain('ROUNDS went from 20000 to 2000000');
   });
 
+  it('uses optimizer admission from the measured commit', async () => {
+    const loaded = await loadConfig(repo);
+    loaded.config.agents.optimizer.enabled = true;
+    loaded.config.agents.analyst.enabled = false;
+    const store = new Store(loaded.dir);
+    const before = (await store.listExperiments()).map((item) => item.id);
+    script([{ tool: 'finish', input: { title: 'No change', summary: 'No change.' } }]);
+    await cycle({ loaded, store, force: true, forceBaseline: true, log: say });
+    expect((await store.listExperiments()).map((item) => item.id)).toEqual(before);
+  });
+
+  it('loads admission from a nested committed profile', async () => {
+    const nestedRepo = mkdtempSync(join(tmpdir(), 'speedpatrol-nested-'));
+    try {
+      gitIn(repo, 'clone', '--quiet', '--local', repo, nestedRepo);
+      mkdirSync(join(nestedRepo, 'config'));
+      gitIn(nestedRepo, 'mv', '.speedpatrol', 'config/.speedpatrol');
+      const configFile = join(nestedRepo, 'config/.speedpatrol/speedpatrol.yml');
+      writeFileSync(configFile, readFileSync(configFile, 'utf8').replace('source: .', 'source: ..'));
+      writeFileSync(join(nestedRepo, '.gitignore'), 'config/.speedpatrol/runs/\n');
+      gitIn(nestedRepo, 'add', '-A');
+      gitIn(nestedRepo, 'commit', '-q', '-m', 'nested profile');
+      const loaded = await loadConfig(join(nestedRepo, 'config'));
+      loaded.config.agents.optimizer.enabled = true;
+      loaded.config.agents.analyst.enabled = false;
+      const store = new Store(loaded.dir);
+      script([{ tool: 'finish', input: { title: 'No change', summary: 'No change.' } }]);
+      await cycle({ loaded, store, forceBaseline: true, log: say });
+      expect(await store.listExperiments()).toEqual([]);
+    } finally {
+      rmSync(nestedRepo, { recursive: true, force: true });
+    }
+  });
+
+  it('checks the committed candidate without ignored agent files', async () => {
+    const loaded = await loadConfig(repo);
+    loaded.config.agents.optimizer.checks = ['test ! -e agent-only.js'];
+    script([
+      { write: { file: 'agent-only.js', text: 'agent artifact' } },
+      { write: { file: 'work.js', text: `${readFileSync(join(repo, 'work.js'), 'utf8')}\n// candidate\n` } },
+      { tool: 'finish', input: { title: 'Candidate', summary: 'Candidate.' } },
+    ]);
+    const result = await runOptimizer({
+      loaded,
+      store: new Store(loaded.dir),
+      benchmark: loaded.benchmarks.find((item) => item.id === 'api.items')!,
+      baseSha: gitIn(repo, 'rev-parse', 'HEAD'),
+      log: say,
+    });
+    expect(result.experiment.comparisonId, result.experiment.reason).toBeDefined();
+  });
+
+  it('discards cached base artifacts before final measurement', async () => {
+    const loaded = await loadConfig(repo);
+    const store = new Store(loaded.dir);
+    const head = gitIn(repo, 'rev-parse', 'HEAD');
+    const base = await checkout(repo, store, head);
+    const artifact = join(base.dir, 'agent-only.js');
+    writeFileSync(artifact, 'cached artifact');
+    loaded.config.app.prepare = [
+      {
+        run: "if test -f agent-only.js; then sed -i 's/ROUNDS = 2000000/ROUNDS = 20000000/' work.js; fi",
+        env: {},
+        capture: {},
+        background: false,
+        timeoutMs: 10_000,
+      },
+    ];
+    try {
+      script([
+        { write: { file: 'work.js', text: `${readFileSync(join(repo, 'work.js'), 'utf8')}\n// candidate\n` } },
+        { tool: 'finish', input: { title: 'Candidate', summary: 'Candidate.' } },
+      ]);
+      const result = await runOptimizer({
+        loaded,
+        store,
+        benchmark: loaded.benchmarks.find((item) => item.id === 'api.items')!,
+        baseSha: head,
+        log: say,
+      });
+      expect(result.experiment.status, result.experiment.reason).toBe('rejected');
+      expect(result.experiment.comparisonId, result.experiment.reason).toBeDefined();
+      expect(readFileSync(join(base.dir, 'work.js'), 'utf8')).toBe(readFileSync(join(repo, 'work.js'), 'utf8'));
+    } finally {
+      gitIn(base.dir, 'reset', '--hard', head);
+      rmSync(artifact, { force: true });
+    }
+  });
+
+  it('discards ignored check outputs before measuring the candidate', async () => {
+    const loaded = await loadConfig(repo);
+    loaded.config.agents.optimizer.checks = ['printf artifact > agent-only.js'];
+    const candidate = `import { existsSync } from 'node:fs';\n${readFileSync(join(repo, 'work.js'), 'utf8')}`.replace(
+      'let x = 0;',
+      "if (existsSync(new URL('./agent-only.js', import.meta.url))) return 0; let x = 0;",
+    );
+    script([
+      { write: { file: 'work.js', text: candidate } },
+      { tool: 'finish', input: { title: 'Candidate', summary: 'Candidate.' } },
+    ]);
+    const result = await runOptimizer({
+      loaded,
+      store: new Store(loaded.dir),
+      benchmark: loaded.benchmarks.find((item) => item.id === 'api.items')!,
+      baseSha: gitIn(repo, 'rev-parse', 'HEAD'),
+      log: say,
+    });
+    expect(result.experiment.status, result.experiment.reason).toBe('rejected');
+    expect(result.experiment.comparisonId, result.experiment.reason).toBeDefined();
+  });
+
+  it.each(['printf "\\n// hook\\n" >> server.js\ngit add server.js', 'printf "\\n// hook\\n" >> work.js'])(
+    'rejects a repository hook that changes the validated candidate',
+    async (command) => {
+      const hook = resolve(repo, gitIn(repo, 'rev-parse', '--git-path', 'hooks/pre-commit'));
+      writeFileSync(hook, `#!/bin/sh\n${command}\n`, { mode: 0o755 });
+      try {
+        const loaded = await loadConfig(repo);
+        script([
+          { write: { file: 'work.js', text: `${readFileSync(join(repo, 'work.js'), 'utf8')}\n// candidate\n` } },
+          { tool: 'finish', input: { title: 'Change work rounds', summary: 'Change work rounds.' } },
+        ]);
+        const result = await runOptimizer({
+          loaded,
+          store: new Store(loaded.dir),
+          benchmark: loaded.benchmarks.find((item) => item.id === 'api.items')!,
+          baseSha: gitIn(repo, 'rev-parse', 'HEAD'),
+          log: say,
+        });
+        expect(result.experiment.status, result.experiment.reason).toBe('rejected');
+        expect(result.experiment.reason).toContain('Repository hooks modified');
+      } finally {
+        rmSync(hook);
+      }
+    },
+  );
+
   it('the optimizer rejects a change that does not speed up the benchmark', async () => {
     const loaded = await loadConfig(repo);
     const store = new Store(loaded.dir);
@@ -176,15 +314,100 @@ describe('agents over MCP', () => {
       { tool: 'set_hypothesis', input: { hypothesis: 'A comment makes it faster.' } },
       {
         edit: {
-          file: 'server.js',
-          from: "import { work } from './work.js';",
-          to: "import { work } from './work.js'; // fast",
+          file: 'work.js',
+          from: 'ROUNDS = 2000000',
+          to: 'ROUNDS = 2000000 // fast',
         },
       },
       { tool: 'finish', input: { title: 'Add a comment to the server', summary: 'Added a comment.' } },
     ]);
     const placebo = await runOptimizer({ loaded, store, benchmark, baseSha: head, log: say });
     expect(placebo.experiment.status, placebo.experiment.reason).toBe('rejected');
+  });
+
+  it.each([
+    ['a failed declared check', ['false'], 'Optimizer check failed', undefined],
+    ['a check that resets HEAD', ['git reset --hard HEAD~1'], 'Optimizer checks modified', undefined],
+    ['an untracked scratch file', ['true'], 'Untracked scratch files', { file: 'scratch.tmp', text: 'scratch' }],
+    [
+      'a staged scratch file',
+      ['true'],
+      'Changed paths are outside allowedPaths',
+      { file: 'scratch.tmp', text: 'scratch', stage: true },
+    ],
+  ])('rejects %s before acceptance', async (_label, checks, reason, write) => {
+    const loaded = await loadConfig(repo);
+    loaded.config.agents.optimizer.checks = checks;
+    const store = new Store(loaded.dir);
+    const benchmark = loaded.benchmarks.find((item) => item.id === 'api.items')!;
+    const head = gitIn(repo, 'rev-parse', 'HEAD');
+    script([
+      { tool: 'get_target' },
+      ...(write ? [{ write }] : []),
+      { edit: { file: 'work.js', from: 'ROUNDS = 2000000', to: 'ROUNDS = 20000' } },
+      { tool: 'finish', input: { title: 'Change work rounds', summary: 'Change work rounds.' } },
+    ]);
+    const result = await runOptimizer({ loaded, store, benchmark, baseSha: head, log: say });
+    expect(result.experiment.status).toBe('rejected');
+    expect(result.experiment.reason).toContain(reason);
+  });
+
+  it('checks both paths of a staged rename', async () => {
+    const loaded = await loadConfig(repo);
+    loaded.config.agents.optimizer.allowedPaths = ['renamed.js'];
+    const benchmark = loaded.benchmarks.find((item) => item.id === 'api.items')!;
+    benchmark.measures = ['renamed.js'];
+    script([
+      { move: { from: 'work.js', to: 'renamed.js' } },
+      { tool: 'finish', input: { title: 'Rename work', summary: 'Rename work.' } },
+    ]);
+    const result = await runOptimizer({
+      loaded,
+      store: new Store(loaded.dir),
+      benchmark,
+      baseSha: gitIn(repo, 'rev-parse', 'HEAD'),
+      log: say,
+    });
+    expect(result.experiment.status).toBe('rejected');
+    expect(result.experiment.reason).toContain('Changed paths are outside allowedPaths: work.js');
+  });
+
+  it.each(['', ' && git add work.js'])('rejects tracked preparation edits%s', async (stage) => {
+    const loaded = await loadConfig(repo);
+    loaded.config.app.prepare = [
+      {
+        run: `printf '\\n// generated by prepare\\n' >> work.js${stage}`,
+        env: {},
+        capture: {},
+        background: false,
+        timeoutMs: 10_000,
+      },
+    ];
+    script([{ tool: 'finish', input: { title: 'No optimizer change', summary: 'No optimizer change.' } }]);
+    const result = await runOptimizer({
+      loaded,
+      store: new Store(loaded.dir),
+      benchmark: loaded.benchmarks.find((item) => item.id === 'api.items')!,
+      baseSha: gitIn(repo, 'rev-parse', 'HEAD'),
+      log: say,
+    });
+    expect(result.experiment.status).toBe('rejected');
+    expect(result.experiment.reason).toContain('Preparation modified tracked files');
+  });
+
+  it.each(['api.items', 'api.health'])('honors protected paths declared by %s', async (owner) => {
+    const loaded = await loadConfig(repo);
+    const benchmark = loaded.benchmarks.find((item) => item.id === 'api.items')!;
+    loaded.benchmarks.find((item) => item.id === owner)!.protectedPaths = ['work.js'];
+    const result = await runOptimizer({
+      loaded,
+      store: new Store(loaded.dir),
+      benchmark,
+      baseSha: gitIn(repo, 'rev-parse', 'HEAD'),
+      log: say,
+    });
+    expect(result.experiment.status).toBe('rejected');
+    expect(result.experiment.reason).toContain('checks and allowedPaths');
   });
 
   it.each([
@@ -236,7 +459,7 @@ describe('agents over MCP', () => {
         .replace('source: .', `source: ${JSON.stringify(repo)}`)
         .replace(
           / {2}optimizer:.*\n/,
-          `  optimizer: { use: { runtime: cli, command: 'node -e "setTimeout(() => {}, 60000)"' }, enabled: true, timeoutMinutes: 0.005 }\n`,
+          `  optimizer: { use: { runtime: cli, command: 'node -e "setTimeout(() => {}, 60000)"' }, enabled: true, timeoutMinutes: 0.005, checks: ['true'], allowedPaths: ['work.js'] }\n`,
         ),
     );
     try {

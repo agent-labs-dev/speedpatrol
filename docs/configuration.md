@@ -37,7 +37,7 @@ thresholds:
 agents:
   scout: { use: claude, maxSteps: 60, timeoutMinutes: 30 }
   analyst: { use: claude, timeoutMinutes: 30 }   # raise it when one A/B run takes minutes
-  optimizer: { use: claude, enabled: false, maxPerCycle: 1, minImprovement: 0.05 }
+  optimizer: { use: claude, enabled: false, maxPerCycle: 1, minImprovement: 0.05, checks: ['pnpm test'], allowedPaths: [src/app.ts] }
   # optimizer.commitScope: app   # commit/PR scope when the repo allows only its own (default: benchmark id)
   github: { enabled: false, pullRequests: ready, labels: [speedpatrol] }
   # github.labels are created on the repo before the first issue or PR; an existing label is left as is
@@ -47,6 +47,10 @@ agents:
 `${NAME}` in commands, URLs, headers and bodies is replaced by an env var, an `app.env` value or a captured value.
 
 Optimizer publication must clear both `thresholds.relative` and `agents.optimizer.minImprovement`: the larger is the effective percentage floor. The absolute threshold and significance checks also apply. For example, `relative: 0.10` with `minImprovement: 0.05` requires at least 10%; it cannot publish a 5–10% improvement. Set both to `0.05` when the intended floor is 5%.
+
+An enabled optimizer must declare `checks` and `allowedPaths`. Checks use a fresh checkout of the committed candidate. Final measurements use fresh base and candidate checkouts, excluding ignored files left by the optimizer or declared checks, and any changed file outside `allowedPaths` rejects the experiment. Each allowed path must also appear in the benchmark's `measures` list and must not appear in any benchmark's `protectedPaths` list. These declarations are fail-closed: they prevent a candidate from being accepted without an explicit validation command and measured production boundary.
+
+The source checkout must be clean, and preparation must leave tracked files unchanged. Untracked experiment files are rejected; staged additions must satisfy the same exact path policy as other changes. Checks must leave both the experiment's file status and diff unchanged.
 
 ## Benchmarks
 

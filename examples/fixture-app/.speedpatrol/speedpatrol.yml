@@ -19,10 +19,12 @@ benchmarks:
   - id: api.items
     kind: http
     critical: true
+    measures: [work.js]
     request:
       url: http://127.0.0.1:${PORT}/api/items
   - id: api.health
     kind: http
+    measures: [server.js]
     request:
       url: http://127.0.0.1:${PORT}/api/health
   - id: web.home
@@ -41,9 +43,11 @@ benchmarks:
       url: http://127.0.0.1:4391/api/health
   - id: cli.work
     kind: command
+    measures: [cli.js]
     run: node cli.js
   - id: script.work
     kind: custom
+    measures: [cli.js]
     run: node cli.js --metrics
     metrics:
       work_ms: { unit: ms, better: lower }
