@@ -25,7 +25,7 @@ inputs:
     description: A pull request label that accepts a regression as an intended cost, such as new tests in a timed suite. With it, a regression is still reported but does not fail the job. Empty turns acceptance off.
     default: 'speedpatrol: accept'
   comment:
-    description: Post the table on the pull request, and update it on each push.
+    description: Post the table on the pull request, and update it on each push. A fork pull request usually has a read-only token, so a comment that cannot be posted warns and leaves the table in the job summary.
     default: 'true'
   github-token:
     description: 'The token for gh. It needs `pull-requests: write` to comment.'
@@ -123,20 +123,33 @@ runs:
           printf '\n**Accepted**: the `%s` label marks this regression as an intended cost.\n' "$LABEL" | tee -a "$GITHUB_STEP_SUMMARY" >> "$RUNNER_TEMP/speedpatrol.md"
         fi
 
+    # A pull request whose head is in another repository usually gets a read-only
+    # token, so posting can fail. A comment is a convenience, never the verdict:
+    # a failure warns and leaves the check result alone.
     - name: Comment on the pull request
       if: inputs.comment == 'true' && github.event.pull_request.number
       shell: bash
       env:
         GH_TOKEN: ${{ inputs.github-token }}
         PR: ${{ github.event.pull_request.number }}
+        FORK: ${{ github.event.pull_request.head.repo.fork }}
       run: |
         marker='<!-- speedpatrol -->'
         { echo "$marker"; echo '### Speedpatrol'; echo; cat "$RUNNER_TEMP/speedpatrol.md"; } > "$RUNNER_TEMP/comment.md"
-        existing=$(gh api "repos/$GITHUB_REPOSITORY/issues/$PR/comments" --paginate --jq ".[] | select(.body | startswith(\"$marker\")) | .id" | head -n 1)
-        if [ -n "$existing" ]; then
-          gh api -X PATCH "repos/$GITHUB_REPOSITORY/issues/comments/$existing" -F "body=@$RUNNER_TEMP/comment.md" > /dev/null
-        else
-          gh pr comment "$PR" --body-file "$RUNNER_TEMP/comment.md"
+        failed=0
+        existing=$(gh api "repos/$GITHUB_REPOSITORY/issues/$PR/comments" --paginate --jq ".[] | select(.body | startswith(\"$marker\")) | .id" | head -n 1) || failed=1
+        if [ "$failed" -eq 0 ] && [ -n "$existing" ]; then
+          gh api -X PATCH "repos/$GITHUB_REPOSITORY/issues/comments/$existing" -F "body=@$RUNNER_TEMP/comment.md" > /dev/null || failed=1
+        elif [ "$failed" -eq 0 ]; then
+          gh pr comment "$PR" --body-file "$RUNNER_TEMP/comment.md" || failed=1
+        fi
+        if [ "$failed" -ne 0 ]; then
+          if [ "$FORK" = true ]; then
+            echo "A fork pull request has a read-only token by default, so the table is in this job's summary and not in a comment." >> "$GITHUB_STEP_SUMMARY"
+            echo "::warning::Speedpatrol could not comment on this fork pull request. Its token is read-only by default, so the table stays in this job's summary."
+          else
+            echo "::warning::Speedpatrol could not post the table on this pull request. The token may lack pull-requests: write. The table is in this job's summary."
+          fi
         fi
 
     - name: Fail on a regression
