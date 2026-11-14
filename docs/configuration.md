@@ -173,3 +173,5 @@ Each role also takes `maxSteps` (60), `timeoutMinutes` (30) and `budgetUsd` (mod
 ### Package-manager environment
 
 Commands inherit the environment except `npm_config_user_agent`: that value describes the package manager that launched Speedpatrol (for example, `npx`), not the one preparing or running your app. Removing it lets a Bun command identify itself correctly. Other variables, including registry configuration and credentials, are preserved. An explicitly configured `env.npm_config_user_agent` still takes precedence.
+
+This is the behavior on `main`, and ships in the first release after 0.3.0. Speedpatrol 0.3.0 and earlier pass `npm_config_user_agent` through unchanged, so under `npx speedpatrol` a Bun command sees npm's user agent. On those versions, start the command with `env -u npm_config_user_agent` to remove it.
