@@ -2,15 +2,25 @@ import { execFileSync, spawnSync } from 'node:child_process';
 import { once } from 'node:events';
 import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:net';
-import { tmpdir } from 'node:os';
+import { homedir, tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { type LoadedConfig, loadConfig, Store } from '@speedpatrol/core';
 import { checkout } from '@speedpatrol/probes';
-import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { cycle } from './patrol.js';
 import { publish } from './publish.js';
 import { runOptimizer } from './roles/optimizer.js';
 import { runScout } from './roles/scout.js';
+
+let cache: string;
+beforeAll(() => {
+  cache = mkdtempSync(join(homedir(), '.cache', 'speedpatrol-tests-'));
+  vi.stubEnv('XDG_CACHE_HOME', cache);
+});
+afterAll(() => {
+  vi.unstubAllEnvs();
+  rmSync(cache, { recursive: true, force: true });
+});
 
 const fixture = resolve(import.meta.dirname, '../../../examples/fixture-app');
 const fakeAgent = resolve(import.meta.dirname, 'testing/fake-agent.mjs');
