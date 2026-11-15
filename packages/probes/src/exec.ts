@@ -4,6 +4,7 @@ import { existsSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { Readable } from 'node:stream';
+import { StringDecoder } from 'node:string_decoder';
 
 export type Exec = {
   command: string;
@@ -16,6 +17,9 @@ export type ExecResult = {
   code: number | null;
   stdout: string;
   stderr: string;
+  /** Bytes discarded after the per-stream capture limit. */
+  stdoutOmittedBytes?: number;
+  stderrOmittedBytes?: number;
   wallMs: number;
   /** User and system CPU of the command and its children, from bash `times`. */
   cpuUserMs?: number;
@@ -96,12 +100,18 @@ export function killTree(child: ChildProcess, signal: NodeJS.Signals = 'SIGTERM'
   }
 }
 
-function collect(stream: Readable | null, limit = 4 * 1024 * 1024): { text: () => string } {
-  let text = '';
+/** Drain both pipes, retaining at most 4 MiB per stream, regardless of chunk size. */
+function collect(stream: Readable | null, limit = 4 * 1024 * 1024) {
+  const chunks: Buffer[] = [];
+  let retained = 0;
+  let omitted = 0;
   stream?.on('data', (chunk: Buffer) => {
-    if (text.length < limit) text += chunk.toString();
+    const size = Math.min(chunk.length, limit - retained);
+    if (size) chunks.push(Buffer.from(chunk.subarray(0, size)));
+    retained += size;
+    omitted += chunk.length - size;
   });
-  return { text: () => text };
+  return { text: () => new StringDecoder('utf8').write(Buffer.concat(chunks)), omitted: () => omitted };
 }
 
 /** The package manager launching Speedpatrol is not necessarily the app's. */
@@ -170,6 +180,8 @@ export function runTimed(exec: Exec): Promise<ExecResult> {
         code,
         stdout: stdout.text(),
         stderr: stderr.text(),
+        stdoutOmittedBytes: stdout.omitted(),
+        stderrOmittedBytes: stderr.omitted(),
         wallMs,
         cpuUserMs: times?.user,
         cpuSysMs: times?.sys,

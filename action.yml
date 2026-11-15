@@ -89,6 +89,17 @@ runs:
         ROUNDS: ${{ inputs.rounds }}
         ITERATIONS: ${{ inputs.iterations }}
       run: |
+        evidence=$(mktemp -d "$RUNNER_TEMP/speedpatrol-evidence.XXXXXX")
+        echo "evidence=$evidence" >> "$GITHUB_OUTPUT"
+        echo "evidence-name=${evidence##*/}" >> "$GITHUB_OUTPUT"
+        config="$PWD"
+        while [ ! -f "$config/.speedpatrol/speedpatrol.yml" ] && [ "$config" != / ]; do config=$(dirname "$config"); done
+        data="$config/.speedpatrol/runs"
+        # Snapshot identities, not timestamps: keep only this invocation's evidence.
+        declare -A previous=()
+        for folder in "$data/diagnostics/"*; do
+          [ ! -d "$folder" ] || previous["${folder##*/}"]=1
+        done
         if [ "$(git rev-parse --is-shallow-repository)" = true ]; then
           git fetch --quiet --unshallow origin
         fi
@@ -103,10 +114,31 @@ runs:
         "$SPEEDPATROL_BIN" "$@" > "$RUNNER_TEMP/speedpatrol.json"
         code=$?
         set -e
+        for folder in "$data/diagnostics/"*; do
+          [ -d "$folder" ] || continue
+          id=${folder##*/}
+          [ -z "${previous[$id]:-}" ] || continue
+          if ! {
+            mkdir -p "$evidence/diagnostics" "$evidence/runs" &&
+            cp -R "$folder" "$evidence/diagnostics/" &&
+            { [ ! -f "$data/runs/$id.json" ] || cp "$data/runs/$id.json" "$evidence/runs/"; }
+          }; then
+            echo "::warning::Speedpatrol could not stage failure diagnostics; the comparison exit code is preserved."
+          fi
+        done
         if [ "$code" -ne 0 ] && [ "$code" -ne 1 ]; then exit "$code"; fi
         verdict=$(node -p "require('$RUNNER_TEMP/speedpatrol.json').verdict")
         echo "verdict=$verdict" >> "$GITHUB_OUTPUT"
         cat "$RUNNER_TEMP/speedpatrol.md" >> "$GITHUB_STEP_SUMMARY"
+
+    - name: Retain command failure diagnostics
+      if: always() && steps.compare.outputs.evidence != ''
+      uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+      with:
+        name: ${{ steps.compare.outputs.evidence-name }}
+        path: ${{ steps.compare.outputs.evidence }}
+        if-no-files-found: ignore
+        retention-days: 7
 
     # Read the labels now rather than from the event payload, so re-running the job after adding the label counts.
     - name: Check for an accepted regression

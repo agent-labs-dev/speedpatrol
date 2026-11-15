@@ -35,6 +35,8 @@ jobs:
 | `package` | `speedpatrol@latest` | the npm package to run |
 | `node-version` | `22` | |
 
+Failed command warmups, samples and profiles are retained in a `speedpatrol-evidence-*` artifact for seven days, including when comparison fails. It contains this invocation's diagnostic JSON files and their saved runs. Paths in `results[].diagnostics` resolve from the artifact root. Each stream keeps its first 4 MiB with omitted-byte counts and configured or captured secrets redacted.
+
 The checkout needs the base branch: use `fetch-depth: 0`. A `web` or `electron` benchmark needs Chromium; the Action installs it when the config has one.
 
 A pull request from a fork gets a read-only `GITHUB_TOKEN`, so posting the comment can be refused. Speedpatrol then leaves the table in the job summary and warns; a comment that cannot be posted never fails the check. The verdict still comes from `fail-on-regression`.
