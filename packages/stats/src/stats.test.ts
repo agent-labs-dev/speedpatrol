@@ -120,14 +120,16 @@ it('reports medians from the same outlier-trimmed samples as the change', () => 
       },
     ],
   });
-  const metric = compareRuns([run('base', [10, 10, 10, 10, 250])], [run('head', [20, 20, 20, 20, 500])], {
+  const metric = compareRuns([run('base', [9, 10, 11, 12, 13, 250])], [run('head', [18, 20, 22, 24, 26, 500])], {
     mode: 'ab',
     thresholds,
     baseLabel: 'base',
     headLabel: 'head',
   }).metrics[0]!;
-  expect(metric.base?.median).toBe(10);
-  expect(metric.head?.median).toBe(20);
+  expect(metric.base?.n).toBe(5);
+  expect(metric.head?.n).toBe(5);
+  expect(metric.base?.median).toBe(11);
+  expect(metric.head?.median).toBe(22);
   expect(metric.deltaPct).toBe(metric.head!.median / metric.base!.median - 1);
 });
 
