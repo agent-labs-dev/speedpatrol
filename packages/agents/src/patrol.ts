@@ -13,6 +13,7 @@ import {
 } from '@speedpatrol/core';
 import { abCompare, checkout, compareWithBaseline, measure, prepare, recordBaseline } from '@speedpatrol/probes';
 import { compareSamples } from '@speedpatrol/stats';
+import { loadMeasuredConfig } from './measured-config.js';
 import { publish, syncGithub } from './publish.js';
 import { runAnalyst } from './roles/analyst.js';
 import { runOptimizer } from './roles/optimizer.js';
@@ -102,9 +103,8 @@ async function markFixed(store: Store, run: Run, loaded: LoadedConfig): Promise<
 }
 
 /**
- * Measures the patrolled ref (default origin/main) in its own detached
- * worktree, records the baseline, compares it with the previous baseline,
- * and confirms each suspected regression before recording it.
+ * Measures the patrolled ref in its own checkout, records the baseline,
+ * and confirms each suspected regression against the previous baseline.
  */
 export async function measureMain(options: CycleOptions): Promise<CycleResult> {
   const { store, log } = options;
@@ -121,9 +121,7 @@ export async function measureMain(options: CycleOptions): Promise<CycleResult> {
   const tree = await checkout(options.loaded.source, store, sha);
   // The benchmarks and the setup come from the measured commit, so a change to
   // them lands with the code that needs it. The data stays in the primary store.
-  const loaded = existsSync(`${tree.dir}/.speedpatrol/speedpatrol.yml`)
-    ? { ...(await loadConfig(tree.dir)), dir: options.loaded.dir }
-    : { ...options.loaded, source: tree.dir };
+  const loaded = { ...(await loadMeasuredConfig(options.loaded, store, sha)), source: tree.dir };
   log(`measuring ${patrol.pull} at ${sha.slice(0, 10)}`);
   await prepare(loaded, tree.dir, log);
   const run = await measure({ loaded, store, source: tree.dir, purpose: 'baseline', log });
@@ -232,10 +230,13 @@ export async function cycle(options: CycleOptions): Promise<CycleResult> {
     // Without an analyst the regression is still filed, with the numbers alone.
     for (const regression of result.confirmed) await store.saveRegression({ ...regression, status: 'filed' });
   }
-  if (agents.optimizer.enabled && options.optimize !== false && !result.skipped && !result.refused && result.run) {
-    for (const benchmark of await pickTargets(options.loaded, store, agents.optimizer.maxPerCycle)) {
+  if (options.optimize !== false && !result.skipped && !result.refused && result.run) {
+    const optimizerLoaded = await loadMeasuredConfig(options.loaded, store, result.sha);
+    const optimizer = optimizerLoaded.config.agents.optimizer;
+    const targets = optimizer.enabled ? await pickTargets(optimizerLoaded, store, optimizer.maxPerCycle) : [];
+    for (const benchmark of targets) {
       const { experiment } = await runOptimizer({
-        loaded: options.loaded,
+        loaded: optimizerLoaded,
         store,
         benchmark,
         baseSha: result.sha,

@@ -54,6 +54,10 @@ const common = {
   /** The metric the verdict leads with. Default: the probe's own. */
   primary: z.string().optional(),
   profile: profileSchema,
+  /** Production files whose behavior this benchmark measures. */
+  measures: z.array(z.string().min(1)).default([]),
+  /** Benchmark and harness files that must never be optimized as production code. */
+  protectedPaths: z.array(z.string().min(1)).default([]),
 };
 
 const requestSchema = z.object({
@@ -289,6 +293,10 @@ export const agentsSchema = z
         maxPerCycle: z.number().int().nonnegative().default(1),
         /** An improvement smaller than this is not published. */
         minImprovement: z.number().min(0).default(0.05),
+        /** Commands the optimizer must pass before an experiment can be accepted. */
+        checks: z.array(z.string().min(1)).default([]),
+        /** Exact repo-relative files the optimizer is allowed to change. */
+        allowedPaths: z.array(z.string().min(1)).default([]),
         /**
          * Conventional-commit scope of an experiment's commit and PR title
          * (default: the benchmark id). Set it when the repo's commit hooks or
