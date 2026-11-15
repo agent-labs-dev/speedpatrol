@@ -4,9 +4,9 @@ import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, write
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { loadConfig, Store } from '@speedpatrol/core';
+import { type LoadedConfig, loadConfig, Store } from '@speedpatrol/core';
 import { checkout } from '@speedpatrol/probes';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { cycle } from './patrol.js';
 import { publish } from './publish.js';
 import { runOptimizer } from './roles/optimizer.js';
@@ -35,6 +35,17 @@ describe('agents over MCP', () => {
   let repo: string;
   let signingDir: string;
   const say = () => {};
+  let restorePolicySha: string | undefined;
+  const commitPolicy = (loaded: LoadedConfig) => {
+    restorePolicySha = gitIn(repo, 'rev-parse', 'HEAD');
+    writeFileSync(join(loaded.dir, 'speedpatrol.yml'), JSON.stringify(loaded.config));
+    gitIn(repo, 'add', join(loaded.dir, 'speedpatrol.yml'));
+    gitIn(repo, 'commit', '-q', '-m', 'test committed policy');
+  };
+  afterEach(() => {
+    if (restorePolicySha) gitIn(repo, 'reset', '--hard', restorePolicySha);
+    restorePolicySha = undefined;
+  });
   const script = (steps: unknown[]) => {
     process.env.FAKE_AGENT_SCRIPT = JSON.stringify(steps);
   };
@@ -177,6 +188,32 @@ describe('agents over MCP', () => {
     expect((await store.listExperiments()).map((item) => item.id)).toEqual(before);
   });
 
+  it('ignores optimizer admission mutated in the cached measured checkout', async () => {
+    const loaded = await loadConfig(repo);
+    loaded.config.agents.analyst.enabled = false;
+    const store = new Store(loaded.dir);
+    const cached = await checkout(repo, store, gitIn(repo, 'rev-parse', 'HEAD'));
+    const file = join(cached.dir, '.speedpatrol/speedpatrol.yml');
+    const original = readFileSync(file, 'utf8');
+    const setStatus = store.setStatus.bind(store);
+    store.setStatus = async (status) => {
+      if (status.role === 'runner' && status.state === 'done') {
+        writeFileSync(file, original.replace('enabled: false', 'enabled: true'));
+      }
+      await setStatus(status);
+    };
+    const before = (await store.listExperiments()).map((item) => item.id);
+    try {
+      script([{ tool: 'finish', input: { title: 'No change', summary: 'No change.' } }]);
+      const result = await cycle({ loaded, store, force: true, forceBaseline: true, log: say });
+      expect(result.refused).toBeUndefined();
+      expect(result.skipped).toBe(false);
+      expect((await store.listExperiments()).map((item) => item.id)).toEqual(before);
+    } finally {
+      writeFileSync(file, original);
+    }
+  });
+
   it('loads admission from a nested committed profile', async () => {
     const nestedRepo = mkdtempSync(join(tmpdir(), 'speedpatrol-nested-'));
     try {
@@ -231,6 +268,15 @@ describe('agents over MCP', () => {
       });
       expect(result.experiment.status).toBe('rejected');
       expect(result.experiment.reason).toContain('must be declared');
+      await expect(
+        runOptimizer({
+          loaded,
+          store,
+          benchmark: { ...loaded.benchmarks[0]!, id: 'source.only' },
+          baseSha,
+          log: say,
+        }),
+      ).rejects.toThrow('absent from the measured policy');
     } finally {
       rmSync(policyRepo, { recursive: true, force: true });
     }
@@ -239,6 +285,7 @@ describe('agents over MCP', () => {
   it('checks the committed candidate without ignored agent files', async () => {
     const loaded = await loadConfig(repo);
     loaded.config.agents.optimizer.checks = ['test ! -e agent-only.js'];
+    commitPolicy(loaded);
     script([
       { write: { file: 'agent-only.js', text: 'agent artifact' } },
       { write: { file: 'work.js', text: `${readFileSync(join(repo, 'work.js'), 'utf8')}\n// candidate\n` } },
@@ -257,10 +304,6 @@ describe('agents over MCP', () => {
   it('discards cached base artifacts before final measurement', async () => {
     const loaded = await loadConfig(repo);
     const store = new Store(loaded.dir);
-    const head = gitIn(repo, 'rev-parse', 'HEAD');
-    const base = await checkout(repo, store, head);
-    const artifact = join(base.dir, 'agent-only.js');
-    writeFileSync(artifact, 'cached artifact');
     loaded.config.app.prepare = [
       {
         run: "if test -f agent-only.js; then sed -i 's/ROUNDS = 2000000/ROUNDS = 20000000/' work.js; fi",
@@ -270,6 +313,11 @@ describe('agents over MCP', () => {
         timeoutMs: 10_000,
       },
     ];
+    commitPolicy(loaded);
+    const head = gitIn(repo, 'rev-parse', 'HEAD');
+    const base = await checkout(repo, store, head);
+    const artifact = join(base.dir, 'agent-only.js');
+    writeFileSync(artifact, 'cached artifact');
     try {
       script([
         { write: { file: 'work.js', text: `${readFileSync(join(repo, 'work.js'), 'utf8')}\n// candidate\n` } },
@@ -294,6 +342,7 @@ describe('agents over MCP', () => {
   it('discards ignored check outputs before measuring the candidate', async () => {
     const loaded = await loadConfig(repo);
     loaded.config.agents.optimizer.checks = ['printf artifact > agent-only.js'];
+    commitPolicy(loaded);
     const candidate = `import { existsSync } from 'node:fs';\n${readFileSync(join(repo, 'work.js'), 'utf8')}`.replace(
       'let x = 0;',
       "if (existsSync(new URL('./agent-only.js', import.meta.url))) return 0; let x = 0;",
@@ -374,6 +423,7 @@ describe('agents over MCP', () => {
   ])('rejects %s before acceptance', async (_label, checks, reason, write) => {
     const loaded = await loadConfig(repo);
     loaded.config.agents.optimizer.checks = checks;
+    commitPolicy(loaded);
     const store = new Store(loaded.dir);
     const benchmark = loaded.benchmarks.find((item) => item.id === 'api.items')!;
     const head = gitIn(repo, 'rev-parse', 'HEAD');
@@ -393,6 +443,7 @@ describe('agents over MCP', () => {
     loaded.config.agents.optimizer.allowedPaths = ['renamed.js'];
     const benchmark = loaded.benchmarks.find((item) => item.id === 'api.items')!;
     benchmark.measures = ['renamed.js'];
+    commitPolicy(loaded);
     script([
       { move: { from: 'work.js', to: 'renamed.js' } },
       { tool: 'finish', input: { title: 'Rename work', summary: 'Rename work.' } },
@@ -419,6 +470,7 @@ describe('agents over MCP', () => {
         timeoutMs: 10_000,
       },
     ];
+    commitPolicy(loaded);
     script([{ tool: 'finish', input: { title: 'No optimizer change', summary: 'No optimizer change.' } }]);
     const result = await runOptimizer({
       loaded,
@@ -435,6 +487,7 @@ describe('agents over MCP', () => {
     const loaded = await loadConfig(repo);
     const benchmark = loaded.benchmarks.find((item) => item.id === 'api.items')!;
     loaded.benchmarks.find((item) => item.id === owner)!.protectedPaths = ['work.js'];
+    commitPolicy(loaded);
     const result = await runOptimizer({
       loaded,
       store: new Store(loaded.dir),

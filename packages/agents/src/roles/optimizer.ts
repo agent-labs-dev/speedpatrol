@@ -1,12 +1,12 @@
 import { existsSync } from 'node:fs';
-import { join, relative, sep } from 'node:path';
+import { relative } from 'node:path';
 import {
   type Benchmark,
   type Comparison,
+  ConfigError,
   type Experiment,
   git,
   type LoadedConfig,
-  loadConfigDir,
   newId,
   type Run,
   type Store,
@@ -14,6 +14,7 @@ import {
 } from '@speedpatrol/core';
 import { abCompare, checkout, prepare, runTimed } from '@speedpatrol/probes';
 import { comparisonMarkdown, formatPct } from '@speedpatrol/stats';
+import { loadMeasuredConfig } from '../measured-config.js';
 import { runRole } from '../session.js';
 import { readInstructions } from '../tools/benchmarks.js';
 import { profileDiffText } from '../tools/measure.js';
@@ -94,27 +95,10 @@ export async function runOptimizer(options: {
     await store.saveExperiment(experiment);
     return { experiment };
   }
-  const configPath = relative(sourceLoaded.source, sourceLoaded.dir);
-  const externalConfig = configPath === '..' || configPath.startsWith(`..${sep}`);
-  let loaded = sourceLoaded;
-  if (!externalConfig) {
-    // checkout() reuses cached directories, which may have been mutated by a
-    // previous prepare/check run. Read policy from a fresh detached worktree,
-    // then remove it before any candidate work begins.
-    const policyDir = store.path('policy-checkouts', newId());
-    await git(sourceLoaded.source, ['worktree', 'add', '--detach', '--force', policyDir, options.baseSha]);
-    try {
-      loaded = {
-        ...(await loadConfigDir(join(policyDir, configPath))),
-        dir: sourceLoaded.dir,
-        source: sourceLoaded.source,
-      };
-    } finally {
-      await tryGit(sourceLoaded.source, ['worktree', 'remove', '--force', policyDir]);
-    }
-  }
+  const loaded = await loadMeasuredConfig(sourceLoaded, store, options.baseSha);
   const base = await checkout(sourceLoaded.source, store, options.baseSha);
-  const benchmark = loaded.benchmarks.find((item) => item.id === options.benchmark.id) ?? options.benchmark;
+  const benchmark = loaded.benchmarks.find((item) => item.id === options.benchmark.id);
+  if (!benchmark) throw new ConfigError(`Benchmark ${options.benchmark.id} is absent from the measured policy.`);
   const config = loaded.config.agents.optimizer;
   const protectedPaths = new Set(loaded.benchmarks.flatMap((item) => item.protectedPaths));
   const id = newId();

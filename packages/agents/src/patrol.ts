@@ -1,11 +1,9 @@
 import { existsSync } from 'node:fs';
 import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
-import { join, relative, sep } from 'node:path';
 import {
   type Comparison,
   type LoadedConfig,
   loadConfig,
-  loadConfigDir,
   MeasureError,
   newId,
   type Regression,
@@ -15,6 +13,7 @@ import {
 } from '@speedpatrol/core';
 import { abCompare, checkout, compareWithBaseline, measure, prepare, recordBaseline } from '@speedpatrol/probes';
 import { compareSamples } from '@speedpatrol/stats';
+import { loadMeasuredConfig } from './measured-config.js';
 import { publish, syncGithub } from './publish.js';
 import { runAnalyst } from './roles/analyst.js';
 import { runOptimizer } from './roles/optimizer.js';
@@ -103,14 +102,6 @@ async function markFixed(store: Store, run: Run, loaded: LoadedConfig): Promise<
   return fixed;
 }
 
-/** Share committed policy between measurement and optimization; external profiles stay operator-owned. */
-async function loadMeasuredConfig(loaded: LoadedConfig, dir: string): Promise<LoadedConfig> {
-  const configPath = relative(loaded.source, loaded.dir);
-  const externalConfig = configPath === '..' || configPath.startsWith(`..${sep}`);
-  if (externalConfig) return { ...loaded, source: dir };
-  return { ...(await loadConfigDir(join(dir, configPath))), dir: loaded.dir };
-}
-
 /**
  * Measures the patrolled ref in its own checkout, records the baseline,
  * and confirms each suspected regression against the previous baseline.
@@ -130,7 +121,7 @@ export async function measureMain(options: CycleOptions): Promise<CycleResult> {
   const tree = await checkout(options.loaded.source, store, sha);
   // The benchmarks and the setup come from the measured commit, so a change to
   // them lands with the code that needs it. The data stays in the primary store.
-  const loaded = await loadMeasuredConfig(options.loaded, tree.dir);
+  const loaded = { ...(await loadMeasuredConfig(options.loaded, store, sha)), source: tree.dir };
   log(`measuring ${patrol.pull} at ${sha.slice(0, 10)}`);
   await prepare(loaded, tree.dir, log);
   const run = await measure({ loaded, store, source: tree.dir, purpose: 'baseline', log });
@@ -240,11 +231,7 @@ export async function cycle(options: CycleOptions): Promise<CycleResult> {
     for (const regression of result.confirmed) await store.saveRegression({ ...regression, status: 'filed' });
   }
   if (options.optimize !== false && !result.skipped && !result.refused && result.run) {
-    const tree = await checkout(options.loaded.source, store, result.sha);
-    const optimizerLoaded = {
-      ...(await loadMeasuredConfig(options.loaded, tree.dir)),
-      source: options.loaded.source,
-    };
+    const optimizerLoaded = await loadMeasuredConfig(options.loaded, store, result.sha);
     const optimizer = optimizerLoaded.config.agents.optimizer;
     const targets = optimizer.enabled ? await pickTargets(optimizerLoaded, store, optimizer.maxPerCycle) : [];
     for (const benchmark of targets) {
