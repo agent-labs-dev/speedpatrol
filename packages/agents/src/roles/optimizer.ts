@@ -6,6 +6,7 @@ import {
   type Experiment,
   git,
   type LoadedConfig,
+  loadConfig,
   newId,
   type Run,
   type Store,
@@ -78,7 +79,7 @@ export async function runOptimizer(options: {
   log: (line: string) => void;
 }): Promise<OptimizerResult> {
   const { loaded, store, benchmark, log } = options;
-  const config = loaded.config.agents.optimizer;
+  let config = loaded.config.agents.optimizer;
   const protectedPaths = new Set(loaded.benchmarks.flatMap((item) => item.protectedPaths));
   const id = newId();
   const branch = `speedpatrol/speedup-${benchmark.id.replace(/[^a-z0-9-]+/g, '-')}-${id.slice(-4)}`;
@@ -120,7 +121,7 @@ export async function runOptimizer(options: {
     return { experiment };
   }
   await save({});
-  if (await tryGit(loaded.source, ['status', '--porcelain'])) {
+  if (await tryGit(loaded.source, ['status', '--porcelain', '--untracked-files=all'])) {
     await save({ status: 'rejected', reason: 'The source checkout has uncommitted changes.' });
     return { experiment };
   }
@@ -130,6 +131,10 @@ export async function runOptimizer(options: {
   const guard = [benchmark.id, ...critical];
   try {
     await prepare(loaded, worktree, log);
+    // Preparation is allowed to generate local state, but it must not change
+    // the policy the candidate is judged against. Reload the committed policy
+    // from the prepared checkout after setup has completed.
+    config = (await loadConfig(worktree)).config.agents.optimizer;
     if (await git(worktree, ['diff', '--no-renames', '--name-only', 'HEAD'])) {
       await save({ status: 'rejected', reason: 'Preparation modified tracked files before the optimizer started.' });
       return { experiment };
@@ -224,11 +229,11 @@ export async function runOptimizer(options: {
       await save({ status: 'failed', reason: outcome.error });
       return { experiment };
     }
-    if (!(await tryGit(worktree, ['status', '--porcelain']))) {
+    if (!(await tryGit(worktree, ['status', '--porcelain', '--untracked-files=all']))) {
       await save({ status: 'rejected', reason: 'The optimizer made no change.' });
       return { experiment };
     }
-    const status = await git(worktree, ['status', '--porcelain']);
+    const status = await git(worktree, ['status', '--porcelain', '--untracked-files=all']);
     const untracked = status
       .split('\n')
       .filter((line) => line.startsWith('?? '))
@@ -261,7 +266,7 @@ export async function runOptimizer(options: {
       `${experiment.summary ?? ''}\n\nProposed by the Speedpatrol optimizer.`,
     ]);
     if (
-      (await git(worktree, ['status', '--porcelain'])) ||
+      (await git(worktree, ['status', '--porcelain', '--untracked-files=all'])) ||
       (await git(worktree, ['diff', '--binary', options.baseSha, 'HEAD'])) !== candidateDiff
     ) {
       await save({ status: 'rejected', reason: 'Repository hooks modified the validated experiment.' });
@@ -272,7 +277,7 @@ export async function runOptimizer(options: {
     await git(loaded.source, ['worktree', 'add', '--detach', verificationDir, headSha]);
     await prepare(loaded, verificationDir, log);
     if (
-      (await git(verificationDir, ['status', '--porcelain'])) ||
+      (await git(verificationDir, ['status', '--porcelain', '--untracked-files=all'])) ||
       (await git(verificationDir, ['rev-parse', 'HEAD'])) !== headSha
     ) {
       await save({ status: 'rejected', reason: 'Preparation modified the committed verification checkout.' });
@@ -292,7 +297,7 @@ export async function runOptimizer(options: {
       }
     }
     if (
-      (await git(verificationDir, ['status', '--porcelain'])) ||
+      (await git(verificationDir, ['status', '--porcelain', '--untracked-files=all'])) ||
       (await git(verificationDir, ['rev-parse', 'HEAD'])) !== headSha
     ) {
       await save({ status: 'rejected', reason: 'Optimizer checks modified the experiment worktree.' });
@@ -340,7 +345,10 @@ async function verify(
     [baseDir, experiment.baseSha],
     [headDir, experiment.headSha],
   ] as const) {
-    if ((await git(dir, ['status', '--porcelain'])) || (await git(dir, ['rev-parse', 'HEAD'])) !== sha) {
+    if (
+      (await git(dir, ['status', '--porcelain', '--untracked-files=all'])) ||
+      (await git(dir, ['rev-parse', 'HEAD'])) !== sha
+    ) {
       await save({
         status: 'rejected',
         comparisonId: comparison.id,
