@@ -74,7 +74,7 @@ benchmarks: []
 # Commit this file, instructions.md and benchmarks.json. runs/ is local data.
 version: 1
 project:
-  name: ${detected.name}
+  name: ${JSON.stringify(detected.name)}
   source: .
 app:
   # Run once per checkout, never timed: install and build.
