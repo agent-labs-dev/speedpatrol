@@ -7,6 +7,7 @@ import {
   type Experiment,
   git,
   type LoadedConfig,
+  type MetricComparison,
   newId,
   type Run,
   type Store,
@@ -64,6 +65,16 @@ export function subject(text: string): string {
   return (space > 20 ? cut.slice(0, space) : cut).trimEnd();
 }
 
+/** Explains the measured gate that failed, so more evidence is not mistaken for a small effect. */
+export function rejectionReason(target: MetricComparison | undefined, min: number, alpha: number): string {
+  if (!target || target.verdict === 'missing') return 'The target was not measured.';
+  const change = formatPct(target.deltaPct);
+  if (target.pValue >= alpha || (target.ci[0] <= 0 && target.ci[1] >= 0)) {
+    return `The target change (${change}) is not statistically conclusive (p=${target.pValue.toPrecision(3)}, confidence interval ${formatPct(target.ci[0])} to ${formatPct(target.ci[1])}). Collect more independent rounds.`;
+  }
+  return `The target did not meet the ${(min * 100).toFixed(0)}% improvement requirement (${target.verdict}, ${change}).`;
+}
+
 export type OptimizerResult = { experiment: Experiment; comparison?: Comparison };
 
 /**
@@ -103,9 +114,9 @@ export async function runOptimizer(options: {
   const protectedPaths = new Set(loaded.benchmarks.flatMap((item) => item.protectedPaths));
   const id = newId();
   const branch = `speedpatrol/speedup-${benchmark.id.replace(/[^a-z0-9-]+/g, '-')}-${id.slice(-4)}`;
-  const worktree = store.path('worktrees', id);
-  const verificationDir = store.path('worktrees', `${id}-verify`);
-  const verificationBaseDir = store.path('worktrees', `${id}-verify-base`);
+  const worktree = store.workspacePath('worktrees', id);
+  const verificationDir = store.workspacePath('worktrees', `${id}-verify`);
+  const verificationBaseDir = store.workspacePath('worktrees', `${id}-verify-base`);
   const now = () => new Date().toISOString();
   let experiment: Experiment = {
     id,
@@ -385,7 +396,7 @@ async function verify(
       ? undefined
       : collateral.length
         ? `Slower elsewhere: ${collateral.join(', ')}`
-        : `The target did not improve by ${(min * 100).toFixed(0)}% (${target ? `${target.verdict}, ${formatPct(target.deltaPct)}` : 'not measured'}).`,
+        : rejectionReason(target, min, loaded.config.thresholds.alpha),
   });
   return { experiment: (await store.getExperiment(experiment.id))!, comparison };
 }

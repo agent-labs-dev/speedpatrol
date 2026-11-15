@@ -112,14 +112,14 @@ export async function compareWithBaseline(
 
 /**
  * A detached worktree of `ref`, so a ref can be measured next to the working
- * checkout. Speedpatrol keeps them under runs/checkouts and reuses one per sha.
+ * checkout. Speedpatrol keeps them in the profile's external cache and reuses one per sha.
  */
 export async function checkout(repo: string, store: Store, ref: string): Promise<{ dir: string; sha: string }> {
   const sha = await tryGit(repo, ['rev-parse', '--verify', `${ref}^{commit}`]);
   if (!sha) throw new MeasureError(`Unknown git ref: ${ref}`);
-  const dir = store.path('checkouts', sha.slice(0, 12));
+  const dir = store.workspacePath('checkouts', sha.slice(0, 12));
   if (!existsSync(dir)) {
-    await mkdir(store.path('checkouts'), { recursive: true });
+    await mkdir(store.workspacePath('checkouts'), { recursive: true });
     await git(repo, ['worktree', 'add', '--detach', '--force', dir, sha]);
   }
   return { dir, sha };

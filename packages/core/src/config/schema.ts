@@ -72,6 +72,24 @@ const httpSchema = z.object({
   kind: z.literal('http'),
   request: requestSchema,
   expectStatus: z.number().int().default(200),
+  /** SSE event names, mapped to millisecond metric names. No payload interpretation. */
+  stream: z
+    .object({
+      events: z
+        .record(
+          z
+            .string()
+            .regex(/^[a-z][a-z0-9_]*_ms$/)
+            .refine(
+              (name) => !['total_ms', 'ttfb_ms', 'p95_ms', 'first_event_ms'].includes(name),
+              'reserved HTTP metric name',
+            ),
+          z.string().min(1),
+        )
+        .default({}),
+      endEvent: z.string().min(1).optional(),
+    })
+    .optional(),
   /** Requests in flight at once. Above 1, the probe also reports `rps`. */
   concurrency: z.number().int().positive().default(1),
 });
@@ -357,7 +375,7 @@ export const configSchema = z.object({
       warmup: z.number().int().nonnegative().default(2),
       timeoutMs: z.number().int().positive().default(60_000),
       /** A/B compare: how many alternating rounds of base and head. */
-      rounds: z.number().int().positive().default(2),
+      rounds: z.number().int().positive().default(8),
     })
     .default({}),
   benchmarks: z.array(benchmarkSchema).default([]),

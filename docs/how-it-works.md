@@ -41,7 +41,9 @@ For the same reason, `runs/` is never committed. The definitions that produce th
 
 ## A/B comparisons
 
-Two checkouts measured one after the other can differ because the machine changed between them (another process, the CPU's temperature, a cache). An A/B comparison alternates the sides in rounds — A B, then B A, then A B — and pools the samples of each side (ADR 0004). `defaults.rounds` sets the count (2 by default).
+An A/B comparison alternates the sides in rounds: A B, then B A, then A B. Each paired round contributes one median per side, after trimming iteration outliers within that run. An exact paired sign test checks whether round differences consistently point the same way; a paired bootstrap resamples whole rounds for the interval of the relative median change. The reported sample count is the number of rounds, not the number of iterations. Round medians are never trimmed, so a different machine state remains visible. A verdict also requires the direction supported by the sign test to agree with the reported change.
+
+`defaults.rounds` is 8. At the default `alpha: 0.01`, eight consistently directed non-tied rounds are the minimum that can pass the exact two-sided sign test. A smaller explicit count is exploratory and cannot establish significance at that level. More iterations improve a round's estimate; more rounds provide more independent evidence. The [NIST sign test reference](https://www.itl.nist.gov/div898/software/dataplot/refman1/auxillar/signtest.htm) describes the exact binomial test.
 
 ## The patrol cycle
 

@@ -13,8 +13,8 @@ All data is plain JSON under `.speedpatrol/runs/` (git ignores it), so the dashb
 | `sessions/<id>/events.jsonl` | Each agent step: thought, tool call, tool result, cost |
 | `agents.json` | The current status of each role, with the writer's pid |
 | `patrol.json` | The last measured sha and the cycle count |
-| `checkouts/<sha>/` | Detached worktrees of measured commits |
-| `worktrees/<id>/` | Experiment worktrees |
+
+Full source checkouts, experiment worktrees and verification worktrees live under `$XDG_CACHE_HOME/speedpatrol/<profile-hash>/` (default `~/.cache/speedpatrol/`). The hash identifies the absolute configuration directory. Keeping source copies outside the measured repository prevents recursive linters and source walkers from discovering duplicate files. Reports and profiles remain in the local JSON store.
 
 ## A run, abridged
 

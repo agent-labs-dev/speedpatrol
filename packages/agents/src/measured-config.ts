@@ -6,7 +6,7 @@ export async function loadMeasuredConfig(loaded: LoadedConfig, store: Store, sha
   const configPath = relative(loaded.source, loaded.dir);
   // Profiles outside the source repository remain owned by the operator.
   if (configPath === '..' || configPath.startsWith(`..${sep}`)) return loaded;
-  const dir = store.path('policy-checkouts', newId());
+  const dir = store.workspacePath('policy-checkouts', newId());
   await git(loaded.source, ['worktree', 'add', '--detach', dir, sha]);
   try {
     return { ...(await loadConfigDir(join(dir, configPath))), dir: loaded.dir, source: loaded.source };

@@ -65,6 +65,28 @@ export function mannWhitney(a: readonly number[], b: readonly number[]): { u: nu
   return { u, p: Math.min(1, 2 * (1 - normalCdf(Math.max(0, z)))) };
 }
 
+/** Exact two-sided paired sign test; zero differences carry no directional evidence.
+ * https://www.itl.nist.gov/div898/software/dataplot/refman1/auxillar/signtest.htm
+ */
+export function pairedSignTest(base: readonly number[], head: readonly number[]): { p: number; direction: number } {
+  if (base.length !== head.length) throw new Error('Paired samples must have equal lengths');
+  let positive = 0;
+  let negative = 0;
+  for (let i = 0; i < base.length; i++) {
+    if (head[i]! > base[i]!) positive++;
+    if (head[i]! < base[i]!) negative++;
+  }
+  const n = positive + negative;
+  if (!n) return { p: 1, direction: 0 };
+  let logChoose = 0;
+  let tail = 0;
+  for (let k = 0; k <= Math.min(positive, negative); k++) {
+    if (k) logChoose += Math.log(n - k + 1) - Math.log(k);
+    tail += Math.exp(logChoose - n * Math.LN2);
+  }
+  return { p: Math.min(1, 2 * tail), direction: Math.sign(positive - negative) };
+}
+
 function resampleMedian(values: readonly number[], random: () => number): number {
   const sample = new Array<number>(values.length);
   for (let i = 0; i < values.length; i++) sample[i] = values[Math.floor(random() * values.length)]!;
@@ -80,15 +102,24 @@ function resampleMedian(values: readonly number[], random: () => number): number
 export function bootstrapDelta(
   base: readonly number[],
   head: readonly number[],
-  options: { resamples?: number; level?: number; seed?: number } = {},
+  options: { resamples?: number; level?: number; seed?: number; paired?: boolean } = {},
 ): [number, number] {
   const { resamples = 2000, level = 0.95, seed = 1 } = options;
+  if (options.paired && base.length !== head.length) throw new Error('Paired samples must have equal lengths');
   if (base.length === 0 || head.length === 0) return [Number.NaN, Number.NaN];
   const random = mulberry32(seed);
   const deltas = new Array<number>(resamples);
   for (let i = 0; i < resamples; i++) {
-    const b = resampleMedian(base, random);
-    const h = resampleMedian(head, random);
+    const indices = options.paired
+      ? Array.from({ length: base.length }, () => Math.floor(random() * base.length))
+      : undefined;
+    const medianAt = (values: readonly number[]) => {
+      const sample = indices!.map((index) => values[index]!).sort((a, b) => a - b);
+      const mid = (sample.length - 1) / 2;
+      return (sample[Math.floor(mid)]! + sample[Math.ceil(mid)]!) / 2;
+    };
+    const b = indices ? medianAt(base) : resampleMedian(base, random);
+    const h = indices ? medianAt(head) : resampleMedian(head, random);
     deltas[i] = b === 0 ? (h === 0 ? 0 : Math.sign(h)) : h / b - 1;
   }
   deltas.sort((x, y) => x - y);

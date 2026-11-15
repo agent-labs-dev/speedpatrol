@@ -68,9 +68,9 @@ function gain(deltaPct: number | undefined, unit: Unit | undefined): string {
   return `${Math.abs((deltaPct ?? 0) * 100).toFixed(0)}% ${unit && SIZES.includes(unit) ? 'smaller' : 'faster'}`;
 }
 
-export function experimentTitle(experiment: Experiment, scope: string, unit?: Unit): string {
+export function experimentTitle(experiment: Experiment, scope: string): string {
   const what = experiment.title ?? `speed up ${experiment.target.benchmark}`;
-  return `perf(${scope}): ${what} (${gain(experiment.deltaPct, unit)})`;
+  return `perf(${scope}): ${what}`;
 }
 
 /** A secondary metric that got slower: the verification only guards the primary ones. */
@@ -163,7 +163,7 @@ export async function publish(
     const target = comparison?.metrics.find(
       (m) => m.benchmark === experiment.target.benchmark && m.metric === experiment.target.metric,
     );
-    const title = experimentTitle(experiment, scope, target?.unit);
+    const title = experimentTitle(experiment, scope);
     const benchmarkTitle = loaded.benchmarks.find((b) => b.id === experiment.target.benchmark)?.title;
     const body = experimentBody(experiment, comparison, target, benchmarkTitle) + FOOTER;
     if (dryRun) {

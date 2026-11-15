@@ -103,7 +103,7 @@ describe('measure and compare the fixture app', () => {
       head: { label: 'main', dir: repo },
       only: ['api.items', 'api.health', 'cli.work'],
       iterations: 10,
-      rounds: 2,
+      rounds: 8,
       profile: false,
     });
     for (const result of runs.flatMap((run) => run.results)) expect(result.profile).toBeUndefined();

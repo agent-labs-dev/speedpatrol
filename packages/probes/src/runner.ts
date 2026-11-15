@@ -229,6 +229,11 @@ async function measureOne(benchmark: Benchmark, options: OneOptions): Promise<Be
       try {
         const artifact = await probe.profile(join(options.profileDir, benchmark.id));
         if (artifact) profile = { ...artifact, path: relative(options.storeRoot, artifact.path) };
+        else if (benchmark.profile.mode === 'auto') {
+          log(
+            `${benchmark.id}: automatic profiling produced no Node CPU profile; for other runtimes set profile.mode to command and provide profile.command.`,
+          );
+        }
       } catch (error) {
         log(`${benchmark.id}: profile failed: ${redact((error as Error).message, app.secretValues)}`);
       }
