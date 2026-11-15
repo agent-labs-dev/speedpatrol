@@ -37,6 +37,8 @@ jobs:
 
 The checkout needs the base branch: use `fetch-depth: 0`. A `web` or `electron` benchmark needs Chromium; the Action installs it when the config has one.
 
+A pull request from a fork gets a read-only `GITHUB_TOKEN`, so posting the comment can be refused. Speedpatrol then leaves the table in the job summary and warns; a comment that cannot be posted never fails the check. The verdict still comes from `fail-on-regression`.
+
 Some regressions are the cost of the change itself: a suite timed as a whole gets slower when a pull request adds tests. Add the `accept-label` label to that pull request and re-run the job. The table and its comment still show the regression, marked as accepted, and the job passes. The label is read when the job runs, so a re-run after labelling is enough; to re-run it automatically, list `labeled` with the default types: `types: [opened, synchronize, reopened, labeled]` (naming any types replaces the defaults).
 
 The `accept-label` input and the label check are on `main`, and ship in the first release after 0.3.0, when the `v0` tag moves to it. Today `@v0` points at 0.3.0, whose Action has no `accept-label` input: GitHub warns that the input is unexpected and ignores it, the label changes nothing, and with `fail-on-regression: true` a labelled regression still fails the job. The check lives in the Action itself, so the `package` input cannot bring it to `@v0`. To use the label before that release, pin the Action to a commit on `main` instead of `@v0`.
