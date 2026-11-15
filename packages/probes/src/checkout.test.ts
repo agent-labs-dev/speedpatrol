@@ -39,6 +39,11 @@ test('measured source copies live outside the repository and remain reusable', a
     expect(relative(repo, first.dir).startsWith('..')).toBe(true);
     expect(await readFile(join(first.dir, 'source.ts'), 'utf8')).toContain('measured');
     expect(await checkout(repo, store, 'HEAD')).toEqual(first);
+    // A copied source directory can survive after its git administration disappears.
+    await rm(join(first.dir, '.git'));
+    const recreated = await checkout(repo, store, 'HEAD');
+    expect(recreated).toEqual(first);
+    expect(execFileSync('git', ['rev-parse', 'HEAD'], { cwd: recreated.dir, encoding: 'utf8' }).trim()).toBe(first.sha);
     expect(store.path('runs')).toBe(join(repo, '.speedpatrol', 'runs', 'runs'));
   } finally {
     vi.unstubAllEnvs();

@@ -1,5 +1,5 @@
 import { existsSync } from 'node:fs';
-import { mkdir, rm } from 'node:fs/promises';
+import { mkdir, realpath, rm } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import {
   type BaselineEntry,
@@ -118,6 +118,16 @@ export async function checkout(repo: string, store: Store, ref: string): Promise
   const sha = await tryGit(repo, ['rev-parse', '--verify', `${ref}^{commit}`]);
   if (!sha) throw new MeasureError(`Unknown git ref: ${ref}`);
   const dir = store.workspacePath('checkouts', sha.slice(0, 12));
+  if (existsSync(dir)) {
+    const currentCommon = await tryGit(repo, ['rev-parse', '--git-common-dir']);
+    const cachedCommon = await tryGit(dir, ['rev-parse', '--git-common-dir']);
+    const cachedHead = await tryGit(dir, ['rev-parse', 'HEAD']);
+    const sameRepository =
+      currentCommon &&
+      cachedCommon &&
+      (await realpath(resolve(repo, currentCommon))) === (await realpath(resolve(dir, cachedCommon)));
+    if (!sameRepository || cachedHead !== sha) await removeCheckout(repo, dir);
+  }
   if (!existsSync(dir)) {
     await mkdir(store.workspacePath('checkouts'), { recursive: true });
     await git(repo, ['worktree', 'add', '--detach', '--force', dir, sha]);

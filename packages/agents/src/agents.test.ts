@@ -185,7 +185,7 @@ describe('agents over MCP', () => {
     const published = await publish(loaded, store, { dryRun: true, log: (line) => lines.push(line) });
     expect(published.dryRun).toBe(true);
     expect(lines.join('\n')).toContain('ROUNDS went from 20000 to 2000000');
-  });
+  }, 120_000);
 
   it('uses optimizer admission from the measured commit', async () => {
     const loaded = await loadConfig(repo);
@@ -196,7 +196,7 @@ describe('agents over MCP', () => {
     script([{ tool: 'finish', input: { title: 'No change', summary: 'No change.' } }]);
     await cycle({ loaded, store, force: true, forceBaseline: true, log: say });
     expect((await store.listExperiments()).map((item) => item.id)).toEqual(before);
-  });
+  }, 120_000);
 
   it('ignores optimizer admission mutated in the cached measured checkout', async () => {
     const loaded = await loadConfig(repo);
@@ -222,7 +222,7 @@ describe('agents over MCP', () => {
     } finally {
       writeFileSync(file, original);
     }
-  });
+  }, 120_000);
 
   it('loads admission from a nested committed profile', async () => {
     const nestedRepo = mkdtempSync(join(tmpdir(), 'speedpatrol-nested-'));

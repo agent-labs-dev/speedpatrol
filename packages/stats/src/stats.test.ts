@@ -170,3 +170,13 @@ it('A/B comparisons count rounds even when each round has hundreds of identical 
   expect(metric.verdict).not.toBe('improvement');
   expect(metric.deltaPct).toBe(metric.head!.median / metric.base!.median - 1);
 });
+
+it('retains complete paired rounds when a noncritical metric misses one round', () => {
+  const base = Array.from({ length: 16 }, (_, i) => run(`base${i}`, [100 + i]));
+  const head = Array.from({ length: 16 }, (_, i) => run(`head${i}`, i === 3 ? [] : [80 + i]));
+  const comparison = compareRuns(base, head, { mode: 'ab', thresholds, baseLabel: 'base', headLabel: 'head' });
+  expect(comparison.metrics[0]?.base?.n).toBe(15);
+  expect(comparison.metrics[0]?.head?.n).toBe(15);
+  expect(comparison.metrics[0]?.verdict).toBe('improvement');
+  expect(comparison.warnings).toContain('latency.total: omitted 1 incomplete paired rounds.');
+});

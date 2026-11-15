@@ -115,11 +115,6 @@ export function compareRuns(baseRuns: readonly Run[], headRuns: readonly Run[], 
   const hashes = new Set([...baseRuns, ...headRuns].map((run) => run.benchmarksHash));
   if (hashes.size > 1) warnings.push('The benchmark definitions changed between the runs.');
   const minimumRounds = Math.floor(1 - Math.log2(options.thresholds.alpha)) + 1;
-  if (options.mode === 'ab' && Math.min(baseRuns.length, headRuns.length) < minimumRounds) {
-    warnings.push(
-      `The exact paired sign test needs at least ${minimumRounds} non-tied rounds to reach p < ${options.thresholds.alpha}. This comparison is exploratory.`,
-    );
-  }
   const headRun = headRuns[0];
   if (headRun?.source.dirty) warnings.push('The head checkout had uncommitted changes.');
 
@@ -143,9 +138,17 @@ export function compareRuns(baseRuns: readonly Run[], headRuns: readonly Run[], 
         });
       const br = roundMedians(baseRuns);
       const hr = roundMedians(headRuns);
-      const complete = br.length === hr.length && ![...br, ...hr].includes(undefined);
-      const bv = paired ? (complete ? (br as number[]) : []) : (bm?.values ?? []);
-      const hv = paired ? (complete ? (hr as number[]) : []) : (hm?.values ?? []);
+      const pairs = br.flatMap((value, index) =>
+        value !== undefined && hr[index] !== undefined ? [[value, hr[index]!] as const] : [],
+      );
+      const dropped = Math.max(br.length, hr.length) - pairs.length;
+      if (paired && dropped) warnings.push(`${id}.${name}: omitted ${dropped} incomplete paired rounds.`);
+      if (paired && pairs.length < minimumRounds)
+        warnings.push(
+          `${id}.${name}: ${pairs.length} complete rounds; the exact sign test needs at least ${minimumRounds} non-tied rounds for p < ${options.thresholds.alpha}. This comparison is exploratory.`,
+        );
+      const bv = paired ? pairs.map(([value]) => value) : (bm?.values ?? []);
+      const hv = paired ? pairs.map(([, value]) => value) : (hm?.values ?? []);
       const result = compareSamples(bv, hv, spec.better, options.thresholds, paired);
       metrics.push({
         benchmark: id,
