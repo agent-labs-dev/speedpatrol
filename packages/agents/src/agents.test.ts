@@ -219,9 +219,12 @@ describe('agents over MCP', () => {
       gitIn(policyRepo, 'add', configFile);
       gitIn(policyRepo, 'commit', '-q', '-m', 'enable optimizer in source');
       const loaded = await loadConfig(policyRepo);
+      const store = new Store(loaded.dir);
+      const cached = await checkout(policyRepo, store, baseSha);
+      writeFileSync(join(cached.dir, '.speedpatrol/speedpatrol.yml'), sourceConfig);
       const result = await runOptimizer({
         loaded,
-        store: new Store(loaded.dir),
+        store,
         benchmark: loaded.benchmarks.find((item) => item.id === 'api.items')!,
         baseSha,
         log: say,

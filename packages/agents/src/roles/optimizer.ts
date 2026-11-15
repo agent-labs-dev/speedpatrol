@@ -94,12 +94,26 @@ export async function runOptimizer(options: {
     await store.saveExperiment(experiment);
     return { experiment };
   }
-  const base = await checkout(sourceLoaded.source, store, options.baseSha);
   const configPath = relative(sourceLoaded.source, sourceLoaded.dir);
   const externalConfig = configPath === '..' || configPath.startsWith(`..${sep}`);
-  const loaded = externalConfig
-    ? sourceLoaded
-    : { ...(await loadConfigDir(join(base.dir, configPath))), dir: sourceLoaded.dir, source: sourceLoaded.source };
+  let loaded = sourceLoaded;
+  if (!externalConfig) {
+    // checkout() reuses cached directories, which may have been mutated by a
+    // previous prepare/check run. Read policy from a fresh detached worktree,
+    // then remove it before any candidate work begins.
+    const policyDir = store.path('policy-checkouts', newId());
+    await git(sourceLoaded.source, ['worktree', 'add', '--detach', '--force', policyDir, options.baseSha]);
+    try {
+      loaded = {
+        ...(await loadConfigDir(join(policyDir, configPath))),
+        dir: sourceLoaded.dir,
+        source: sourceLoaded.source,
+      };
+    } finally {
+      await tryGit(sourceLoaded.source, ['worktree', 'remove', '--force', policyDir]);
+    }
+  }
+  const base = await checkout(sourceLoaded.source, store, options.baseSha);
   const benchmark = loaded.benchmarks.find((item) => item.id === options.benchmark.id) ?? options.benchmark;
   const config = loaded.config.agents.optimizer;
   const protectedPaths = new Set(loaded.benchmarks.flatMap((item) => item.protectedPaths));
