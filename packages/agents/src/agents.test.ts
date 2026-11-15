@@ -200,6 +200,39 @@ describe('agents over MCP', () => {
     }
   });
 
+  it('rejects source-only optimizer policy when the measured commit disables it', async () => {
+    const policyRepo = mkdtempSync(join(tmpdir(), 'speedpatrol-policy-'));
+    try {
+      gitIn(repo, 'clone', '--quiet', '--local', repo, policyRepo);
+      const configFile = join(policyRepo, '.speedpatrol/speedpatrol.yml');
+      const baselineConfig = readFileSync(configFile, 'utf8')
+        .replace("checks: ['true']", 'checks: []')
+        .replace("allowedPaths: ['work.js']", 'allowedPaths: []');
+      writeFileSync(configFile, baselineConfig);
+      gitIn(policyRepo, 'add', configFile);
+      gitIn(policyRepo, 'commit', '-q', '-m', 'disable optimizer in baseline');
+      const baseSha = gitIn(policyRepo, 'rev-parse', 'HEAD');
+      const sourceConfig = baselineConfig
+        .replace('checks: []', "checks: ['true']")
+        .replace('allowedPaths: []', "allowedPaths: ['work.js']");
+      writeFileSync(configFile, sourceConfig);
+      gitIn(policyRepo, 'add', configFile);
+      gitIn(policyRepo, 'commit', '-q', '-m', 'enable optimizer in source');
+      const loaded = await loadConfig(policyRepo);
+      const result = await runOptimizer({
+        loaded,
+        store: new Store(loaded.dir),
+        benchmark: loaded.benchmarks.find((item) => item.id === 'api.items')!,
+        baseSha,
+        log: say,
+      });
+      expect(result.experiment.status).toBe('rejected');
+      expect(result.experiment.reason).toContain('must be declared');
+    } finally {
+      rmSync(policyRepo, { recursive: true, force: true });
+    }
+  });
+
   it('checks the committed candidate without ignored agent files', async () => {
     const loaded = await loadConfig(repo);
     loaded.config.agents.optimizer.checks = ['test ! -e agent-only.js'];
