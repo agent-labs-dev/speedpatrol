@@ -1,6 +1,6 @@
 import { thresholdsSchema } from '@speedpatrol/core';
 import { describe, expect, it } from 'vitest';
-import { compareSamples, worstVerdict } from './compare.js';
+import { compareRuns, compareSamples, worstVerdict } from './compare.js';
 import { quantile, summarize, trimOutliers } from './summary.js';
 import { bootstrapDelta, mannWhitney, mulberry32 } from './tests.js';
 
@@ -87,6 +87,50 @@ describe('compareSamples', () => {
       );
     });
   }
+});
+
+it('reports medians from the same outlier-trimmed samples as the change', () => {
+  const run = (id: string, values: number[]) => ({
+    id,
+    purpose: 'compare' as const,
+    startedAt: '',
+    finishedAt: '',
+    source: { dir: '', sha: id, dirty: false },
+    machine: {
+      fingerprint: 'machine',
+      hostname: '',
+      platform: '',
+      arch: '',
+      cpuModel: '',
+      cpus: 1,
+      memoryGb: 1,
+      node: '',
+    },
+    benchmarksHash: 'hash',
+    results: [
+      {
+        benchmark: 'latency',
+        kind: 'command' as const,
+        primary: 'total',
+        iterations: values.length,
+        errors: [],
+        durationMs: 0,
+        critical: true,
+        metrics: { total: { unit: 'ms' as const, better: 'lower' as const, values, summary: summarize(values) } },
+      },
+    ],
+  });
+  const metric = compareRuns([run('base', [9, 10, 11, 12, 13, 250])], [run('head', [18, 20, 22, 24, 26, 500])], {
+    mode: 'ab',
+    thresholds,
+    baseLabel: 'base',
+    headLabel: 'head',
+  }).metrics[0]!;
+  expect(metric.base?.n).toBe(5);
+  expect(metric.head?.n).toBe(5);
+  expect(metric.base?.median).toBe(11);
+  expect(metric.head?.median).toBe(22);
+  expect(metric.deltaPct).toBe(metric.head!.median / metric.base!.median - 1);
 });
 
 it('marks a real change that is smaller than a threshold', () => {
