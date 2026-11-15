@@ -35,7 +35,7 @@ describe('init detection', () => {
 
     const { config, lines } = await run(root);
 
-    expect(config).toContain('name: shortest-path-forever');
+    expect(config).toContain('name: "shortest-path-forever"');
     expect(config).not.toContain('BASE_URL');
     expect(config).toContain('kind: command');
     expect(lines[0]).toContain('no app type found');
@@ -47,14 +47,14 @@ describe('init detection', () => {
     git(root, 'init', '-q');
     git(root, 'remote', 'add', 'origin', 'https://github.com/cjber/hoard-forever.git');
 
-    expect((await run(root)).config).toContain('name: hoard-forever');
+    expect((await run(root)).config).toContain('name: "hoard-forever"');
   });
 
   it('falls back to the folder name when there is no origin', async () => {
     const root = join(workspace(), 'mayhem-fm');
     mkdirSync(root);
 
-    expect((await run(root)).config).toContain('name: mayhem-fm');
+    expect((await run(root)).config).toContain('name: "mayhem-fm"');
   });
 
   it('keeps package.json detection and its name ahead of the remote', async () => {
@@ -69,7 +69,7 @@ describe('init detection', () => {
     const { config, lines } = await run(root);
 
     expect(lines[0]).toContain('detected: web');
-    expect(config).toContain('name: inbox');
+    expect(config).toContain('name: "inbox"');
     expect(config).toContain('BASE_URL: http://127.0.0.1:3000');
     expect(config).toContain('- run: npm run dev');
   });
@@ -83,6 +83,6 @@ describe('init detection', () => {
     const { config, lines } = await run(root);
 
     expect(lines[0]).toContain('detected: api');
-    expect(config).toContain('name: planner');
+    expect(config).toContain('name: "planner"');
   });
 });
