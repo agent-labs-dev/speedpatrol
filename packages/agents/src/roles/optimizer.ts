@@ -1,12 +1,12 @@
 import { existsSync } from 'node:fs';
-import { relative } from 'node:path';
+import { join, relative, sep } from 'node:path';
 import {
   type Benchmark,
   type Comparison,
   type Experiment,
   git,
   type LoadedConfig,
-  loadConfig,
+  loadConfigDir,
   newId,
   type Run,
   type Store,
@@ -78,8 +78,30 @@ export async function runOptimizer(options: {
   baseRun?: Run;
   log: (line: string) => void;
 }): Promise<OptimizerResult> {
-  const { loaded, store, benchmark, log } = options;
-  let config = loaded.config.agents.optimizer;
+  const { loaded: sourceLoaded, store, log } = options;
+  if (await tryGit(sourceLoaded.source, ['status', '--porcelain', '--untracked-files=all'])) {
+    const experiment = {
+      id: newId(),
+      target: { benchmark: options.benchmark.id, metric: '' },
+      status: 'rejected' as const,
+      reason: 'The source checkout has uncommitted changes.',
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      branch: '',
+      worktree: '',
+      baseSha: options.baseSha,
+    };
+    await store.saveExperiment(experiment);
+    return { experiment };
+  }
+  const base = await checkout(sourceLoaded.source, store, options.baseSha);
+  const configPath = relative(sourceLoaded.source, sourceLoaded.dir);
+  const externalConfig = configPath === '..' || configPath.startsWith(`..${sep}`);
+  const loaded = externalConfig
+    ? sourceLoaded
+    : { ...(await loadConfigDir(join(base.dir, configPath))), dir: sourceLoaded.dir, source: sourceLoaded.source };
+  const benchmark = loaded.benchmarks.find((item) => item.id === options.benchmark.id) ?? options.benchmark;
+  const config = loaded.config.agents.optimizer;
   const protectedPaths = new Set(loaded.benchmarks.flatMap((item) => item.protectedPaths));
   const id = newId();
   const branch = `speedpatrol/speedup-${benchmark.id.replace(/[^a-z0-9-]+/g, '-')}-${id.slice(-4)}`;
@@ -121,20 +143,11 @@ export async function runOptimizer(options: {
     return { experiment };
   }
   await save({});
-  if (await tryGit(loaded.source, ['status', '--porcelain', '--untracked-files=all'])) {
-    await save({ status: 'rejected', reason: 'The source checkout has uncommitted changes.' });
-    return { experiment };
-  }
   await git(loaded.source, ['worktree', 'add', '-b', branch, worktree, options.baseSha]);
-  const base = await checkout(loaded.source, store, options.baseSha);
   const critical = loaded.benchmarks.filter((b) => b.critical && b.id !== benchmark.id).map((b) => b.id);
   const guard = [benchmark.id, ...critical];
   try {
     await prepare(loaded, worktree, log);
-    // Preparation is allowed to generate local state, but it must not change
-    // the policy the candidate is judged against. Reload the committed policy
-    // from the prepared checkout after setup has completed.
-    config = (await loadConfig(worktree)).config.agents.optimizer;
     if (await git(worktree, ['diff', '--no-renames', '--name-only', 'HEAD'])) {
       await save({ status: 'rejected', reason: 'Preparation modified tracked files before the optimizer started.' });
       return { experiment };
