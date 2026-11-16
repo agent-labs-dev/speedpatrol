@@ -62,4 +62,4 @@ The optimizer edits code in a new worktree on the branch `speedpatrol/speedup-<b
 
 Commits follow the worktree's Git signing configuration, including `commit.gpgsign`, `user.signingkey`, `gpg.format` and the signer program. Speedpatrol never disables signing or retries a failed signed commit unsigned. If signing is enabled and the configured key is unavailable, the experiment fails with Git's error, before verification or publication, and `optimize` exits 4. Configure the intended signing identity and key on the machine that runs the optimizer; repositories with signing disabled need no signing key.
 
-This is the behavior on `main`, and ships in the first release after 0.3.0. Speedpatrol 0.3.0 and earlier commit with `commit.gpgsign=false`, so their optimizer commits are unsigned whatever the repository configures, and a branch rule that requires signed commits blocks merging the speed-up PR.
+This is the behavior from Speedpatrol 0.4.0. Speedpatrol 0.3.0 and earlier commit with `commit.gpgsign=false`, so their optimizer commits are unsigned whatever the repository configures, and a branch rule that requires signed commits blocks merging the speed-up PR.
