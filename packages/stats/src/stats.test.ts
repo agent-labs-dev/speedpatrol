@@ -2,7 +2,7 @@ import { thresholdsSchema } from '@speedpatrol/core';
 import { describe, expect, it } from 'vitest';
 import { compareRuns, compareSamples, worstVerdict } from './compare.js';
 import { quantile, summarize, trimOutliers } from './summary.js';
-import { bootstrapDelta, mannWhitney, mulberry32, pairedSignTest } from './tests.js';
+import { bootstrapDelta, mannWhitney, mulberry32, pairedSignTest, signTestRounds } from './tests.js';
 
 const thresholds = thresholdsSchema.parse({});
 
@@ -156,6 +156,17 @@ it('does not mistake iterations for independent A/B evidence', () => {
   expect(compareSamples(Array(8).fill(100), Array(8).fill(80), 'lower', thresholds, true).verdict).toBe('improvement');
   expect(pairedSignTest([100, 100, 100], [100, 100, 100]).p).toBe(1);
   expect(pairedSignTest([100, 100, 100, 100], [80, 80, 120, 120]).p).toBe(1);
+});
+it.each([
+  // alpha, disagreeing rounds, rounds: all agreeing gives p = 2 / 2^n, one against gives p = 2 (n + 1) / 2^n.
+  [0.01, 0, 8],
+  [0.01, 1, 12],
+  [0.05, 0, 6],
+  [0.05, 1, 9],
+])('needs the fewest sign-test rounds for alpha %f with %i disagreeing (%i)', (alpha, disagreeing, rounds) => {
+  expect(signTestRounds(alpha, disagreeing)).toBe(rounds);
+  const head = Array.from({ length: rounds - 1 }, (_, i) => (i < disagreeing ? -1 : 1));
+  expect(pairedSignTest(Array(rounds - 1).fill(0), head).p).toBeGreaterThanOrEqual(alpha);
 });
 it('resamples paired rounds together in confidence intervals', () => {
   expect(bootstrapDelta([1, 100, 10000], [2, 200, 20000], { paired: true })).toEqual([1, 1]);

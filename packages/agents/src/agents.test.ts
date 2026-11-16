@@ -2,7 +2,7 @@ import { execFileSync, spawnSync } from 'node:child_process';
 import { once } from 'node:events';
 import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:net';
-import { homedir, tmpdir } from 'node:os';
+import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { type LoadedConfig, loadConfig, Store } from '@speedpatrol/core';
 import { checkout } from '@speedpatrol/probes';
@@ -14,7 +14,7 @@ import { runScout } from './roles/scout.js';
 
 let cache: string;
 beforeAll(() => {
-  cache = mkdtempSync(join(homedir(), '.cache', 'speedpatrol-tests-'));
+  cache = mkdtempSync(join(tmpdir(), 'speedpatrol-tests-'));
   vi.stubEnv('XDG_CACHE_HOME', cache);
 });
 afterAll(() => {

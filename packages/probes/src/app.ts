@@ -23,7 +23,7 @@ export type AppOptions = {
  */
 export class AppSession {
   readonly vars: Record<string, string>;
-  private readonly background: Background[] = [];
+  private readonly background: { run: string; process: Background }[] = [];
   private stopPromise?: Promise<void>;
 
   constructor(private readonly options: AppOptions) {
@@ -85,9 +85,16 @@ export class AppSession {
       this.capture(command, result.stdout + result.stderr);
       return;
     }
-    const process = startBackground(run, this.cwd(command), env);
-    this.background.push(process);
     const readyUrl = command.readyUrl ? interpolate(command.readyUrl, this.vars) : undefined;
+    // Another process already serving the URL would pass the readiness check
+    // and be measured in place of the app, which then fails to bind its port.
+    if (readyUrl && (await urlAnswers(readyUrl))) {
+      throw new MeasureError(
+        `${redact(readyUrl, this.secretValues)} already answers before ${run} started: another process is using it. Stop that process and run again.`,
+      );
+    }
+    const process = startBackground(run, this.cwd(command), env);
+    this.background.push({ run, process });
     const readyWhen = command.readyWhen ? new RegExp(command.readyWhen, 'm') : undefined;
     try {
       await waitUntil(
@@ -113,6 +120,21 @@ export class AppSession {
     this.capture(command, process.output());
   }
 
+  /**
+   * Throws when a background setup process has exited since it was ready:
+   * whatever was measured after that is not the app this session started.
+   */
+  assertRunning(): void {
+    for (const { run, process } of this.background) {
+      if (process.running()) continue;
+      const { exitCode, signalCode } = process.child;
+      const tail = process.output().trim().split('\n').slice(-20).join('\n');
+      throw new MeasureError(
+        `Background setup command exited during the run (${signalCode ?? `code ${exitCode}`}): ${run}\n${redact(tail, this.secretValues)}`,
+      );
+    }
+  }
+
   async stop(): Promise<void> {
     if (this.stopPromise) return this.stopPromise;
     this.stopPromise = (async () => {
@@ -123,7 +145,7 @@ export class AppSession {
           this.say(`teardown failed: ${(error as Error).message}`);
         }
       }
-      for (const process of this.background.reverse()) await process.stop();
+      for (const { process } of this.background.reverse()) await process.stop();
       this.background.length = 0;
     })().finally(() => {
       activeSessions.delete(this);

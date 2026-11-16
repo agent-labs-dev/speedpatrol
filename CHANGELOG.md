@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- A run fails, with exit code 4, when a background setup command's `readyUrl` already answers before the command starts, or when a background setup process exits during the run (also where the exited processes stay as unreaped zombies, as under a container init that does not reap orphans), instead of measuring whatever else serves that port. A `startup` benchmark whose ready URL already answers fails its sample instead of timing the other process (#62).
+- The end-to-end regression test runs enough A/B rounds to keep its verdict when one round disagrees, keeps its cache under the temp directory, and stops the fixture app's processes when a test fails (#61).
+
 ## [0.4.0] - 2026-11-16
 
 ### Added

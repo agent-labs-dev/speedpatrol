@@ -1,17 +1,21 @@
 import { execFileSync } from 'node:child_process';
 import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { homedir, tmpdir } from 'node:os';
+import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { loadConfig, Store } from '@speedpatrol/core';
+import { signTestRounds } from '@speedpatrol/stats';
 import { chromium, errors } from 'playwright';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
+import { stopActiveSessions } from './app.js';
 import { abCompare, checkout, compareWithBaseline, recordBaseline } from './compare.js';
+import { activeGroupCount, killAllGroups, waitUntil } from './exec.js';
 import { runStep } from './probes/web.js';
 import { measure } from './runner.js';
 
 let cache: string;
 beforeAll(() => {
-  cache = mkdtempSync(join(homedir(), '.cache', 'speedpatrol-tests-'));
+  // Under the temp dir, so a killed run leaves nothing in the user's cache.
+  cache = mkdtempSync(join(tmpdir(), 'speedpatrol-tests-'));
   vi.stubEnv('XDG_CACHE_HOME', cache);
 });
 afterAll(() => {
@@ -73,7 +77,14 @@ describe('measure and compare the fixture app', () => {
     gitIn(repo, 'add', '-A');
     gitIn(repo, 'commit', '-q', '-m', 'fixture');
   });
-  afterAll(() => rmSync(repo, { recursive: true, force: true }));
+  afterAll(async () => {
+    // A failed or timed-out test can leave the fixture server running: its
+    // process group is detached and would outlive this worker.
+    await stopActiveSessions(5000);
+    killAllGroups('SIGKILL');
+    await waitUntil(() => activeGroupCount() === 0, 5000, 'the fixture processes to stop');
+    rmSync(repo, { recursive: true, force: true });
+  });
 
   it('measures every probe kind and records a baseline', async () => {
     const loaded = await loadConfig(repo);
@@ -99,7 +110,7 @@ describe('measure and compare the fixture app', () => {
     });
   });
 
-  it('flags a slower work() on the benchmarks that call it, and only those', async () => {
+  it('flags a slower work() on the benchmarks that call it, and only those', { timeout: 120_000 }, async () => {
     const work = join(repo, 'work.js');
     writeFileSync(work, readFileSync(work, 'utf8').replace('ROUNDS = 20000', 'ROUNDS = 2000000'));
     gitIn(repo, 'commit', '-q', '-am', 'slower work');
@@ -113,7 +124,8 @@ describe('measure and compare the fixture app', () => {
       head: { label: 'main', dir: repo },
       only: ['api.items', 'api.health', 'cli.work'],
       iterations: 10,
-      rounds: 8,
+      // Enough rounds that one noisy round against the others still leaves p < alpha.
+      rounds: signTestRounds(loaded.config.thresholds.alpha, 1),
       profile: false,
     });
     for (const result of runs.flatMap((run) => run.results)) expect(result.profile).toBeUndefined();
