@@ -34,6 +34,34 @@ describe('process group cleanup', () => {
     await waitUntil(() => activeGroupCount() === 0, 2000, 'the group to die');
     expect(() => process.kill(grandchild, 0)).toThrow();
   });
+
+  // A zombie stays in its group until its parent waits for it. Here the
+  // parent moves to its own group and never waits, as a container init that
+  // does not reap orphans would, so only a zombie is left in the setup group.
+  it.skipIf(process.platform !== 'linux')('treats a group of only zombies as stopped', async () => {
+    const script = [
+      'import os, time',
+      'group = os.getpgid(0)',
+      'os.setpgid(0, 0)',
+      'pid = os.fork()',
+      'if pid == 0:',
+      '    os.setpgid(0, group)',
+      '    os._exit(0)',
+      'os.waitid(os.P_PID, pid, os.WEXITED | os.WNOWAIT)',
+      'print(os.getpid(), flush=True)',
+      'time.sleep(60)',
+    ].join('\n');
+    child = startBackground(`python3 -c ${shellQuote(script)} & wait`, process.cwd(), {});
+    const background = child;
+    await waitUntil(() => background.output().trim() !== '', 5000, 'the zombie to exist');
+    const parent = Number(background.output().trim());
+    try {
+      process.kill(-background.child.pid!, 'SIGKILL');
+      await waitUntil(() => !background.running(), 2000, 'the zombie-only group to read as stopped');
+    } finally {
+      process.kill(parent, 'SIGKILL');
+    }
+  });
 });
 
 describe('package-manager launcher environment', () => {

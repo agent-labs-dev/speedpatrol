@@ -1,6 +1,6 @@
-import { type ChildProcess, spawn } from 'node:child_process';
+import { type ChildProcess, execFileSync, spawn } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
-import { existsSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { Readable } from 'node:stream';
@@ -35,15 +35,54 @@ const GNU_TIME = process.env.SPEEDPATROL_GNU_TIME ?? '/usr/bin/time';
 // grandchild can outlive the bash leader and keep its port bound.
 const groups = new Set<number>();
 
-/** True while a process of the group is alive; drops the id once it is gone. */
+/** True while a non-zombie process of the group exists; drops the id once none does. */
 function groupAlive(pgid: number): boolean {
   try {
     process.kill(-pgid, 0);
-    return true;
   } catch {
     // ESRCH: the group is gone. EPERM: the id now belongs to someone else.
     groups.delete(pgid);
     return false;
+  }
+  // kill(-pgid, 0) also succeeds while the only members left are zombies,
+  // which stay until their parent or reaper waits for them: a container init
+  // need not reap orphans at all. So the members' states decide.
+  if (hasLiveMember(pgid)) return true;
+  groups.delete(pgid);
+  return false;
+}
+
+/** Whether a member of the group is in any state but zombie (Z) or dead (X). */
+function hasLiveMember(pgid: number): boolean {
+  const live = (state: string | undefined) => state !== undefined && state[0] !== 'Z' && state[0] !== 'X';
+  if (process.platform === 'linux') {
+    let pids: string[];
+    try {
+      pids = readdirSync('/proc').filter((name) => /^\d+$/.test(name));
+    } catch {
+      return true; // No /proc to read: the signal check is all there is.
+    }
+    for (const pid of pids) {
+      let stat: string;
+      try {
+        stat = readFileSync(`/proc/${pid}/stat`, 'utf8');
+      } catch {
+        continue; // Exited since the listing.
+      }
+      // "pid (comm) state ppid pgrp ...": comm can hold spaces and ")".
+      const [state, , pgrp] = stat.slice(stat.lastIndexOf(')') + 2).split(' ');
+      if (Number(pgrp) === pgid && live(state)) return true;
+    }
+    return false;
+  }
+  try {
+    const rows = execFileSync('ps', ['-A', '-o', 'pgid=', '-o', 'stat='], { encoding: 'utf8' });
+    return rows.split('\n').some((row) => {
+      const [group, state] = row.trim().split(/\s+/);
+      return Number(group) === pgid && live(state);
+    });
+  } catch {
+    return true; // No ps to ask: the signal check is all there is.
   }
 }
 
