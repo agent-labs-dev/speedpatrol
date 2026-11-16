@@ -1,6 +1,6 @@
 {
   "name": "speedpatrol",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "A team of AI agents that measures your app's critical paths on every commit, catches regressions, and proposes speed-ups.",
   "license": "Apache-2.0",
   "type": "module",
@@ -27,10 +27,10 @@
     "build": "node build.mjs"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.20.0",
-    "playwright": "1.64.1",
-    "yaml": "^2.5.1",
-    "zod": "^3.23.8"
+    "@modelcontextprotocol/sdk": "^1.32.2",
+    "playwright": "1.65.1",
+    "yaml": "^2.9.1",
+    "zod": "^4.6.7"
   },
   "devDependencies": {
     "@speedpatrol/cli": "workspace:*",

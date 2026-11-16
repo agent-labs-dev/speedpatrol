@@ -22,6 +22,6 @@
     "@speedpatrol/core": "workspace:*",
     "@speedpatrol/probes": "workspace:*",
     "@speedpatrol/stats": "workspace:*",
-    "@modelcontextprotocol/sdk": "^1.20.0"
+    "@modelcontextprotocol/sdk": "^1.32.2"
   }
 }

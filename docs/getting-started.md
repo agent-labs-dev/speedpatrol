@@ -29,7 +29,7 @@ Read https://raw.githubusercontent.com/agent-labs-dev/speedpatrol/main/skills/sp
 You need Node 22 or later and `git`. For `web` and `electron` benchmarks, install Chromium for Playwright one time:
 
 ```bash
-PLAYWRIGHT_SKIP_BROWSER_GC=1 npx -y playwright@1.64.1 install chromium
+PLAYWRIGHT_SKIP_BROWSER_GC=1 npx -y playwright@1.65.1 install chromium
 ```
 
 1. Create the config:

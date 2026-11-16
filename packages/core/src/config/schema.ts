@@ -9,8 +9,8 @@ import { CLI_AGENTS, cliPreset } from './agents.js';
 export const appCommandSchema = z.object({
   run: z.string(),
   cwd: z.string().optional(),
-  env: z.record(z.string()).default({}),
-  capture: z.record(z.string()).default({}),
+  env: z.record(z.string(), z.string()).default({}),
+  capture: z.record(z.string(), z.string()).default({}),
   /** Keep the process alive while the benchmarks run. */
   background: z.boolean().default(false),
   /** Background only: wait until this regex matches the output. */
@@ -36,7 +36,7 @@ const profileSchema = z
     mode: z.enum(['auto', 'node', 'command', 'off']).default('auto'),
     command: z.string().optional(),
   })
-  .default({});
+  .prefault({});
 
 const common = {
   id: z
@@ -63,7 +63,7 @@ const common = {
 const requestSchema = z.object({
   url: z.string(),
   method: z.enum(['GET', 'HEAD', 'OPTIONS', 'POST', 'PUT', 'PATCH', 'DELETE']).default('GET'),
-  headers: z.record(z.string()).default({}),
+  headers: z.record(z.string(), z.string()).default({}),
   body: z.string().optional(),
 });
 
@@ -99,7 +99,7 @@ const commandSchema = z.object({
   kind: z.literal('command'),
   run: z.string(),
   cwd: z.string().optional(),
-  env: z.record(z.string()).default({}),
+  env: z.record(z.string(), z.string()).default({}),
   /** Run before each iteration and not timed, e.g. clearing a cache. */
   before: z.string().optional(),
 });
@@ -116,7 +116,7 @@ const startupSchema = z.object({
   kind: z.literal('startup'),
   run: z.string(),
   cwd: z.string().optional(),
-  env: z.record(z.string()).default({}),
+  env: z.record(z.string(), z.string()).default({}),
   ready: readySchema,
   before: z.string().optional(),
 });
@@ -163,7 +163,7 @@ const electronSchema = z.object({
   /** Launches the app. Must open CDP on `cdpPort`. Leave it out to attach. */
   run: z.string().optional(),
   cwd: z.string().optional(),
-  env: z.record(z.string()).default({}),
+  env: z.record(z.string(), z.string()).default({}),
   /** A number, or `${NAME}` from env or a setup capture. */
   cdpPort: z.union([z.number().int().positive(), z.string()]),
   /** Attach: the window whose URL contains this. Default: the first page. */
@@ -212,9 +212,10 @@ const customSchema = z.object({
   kind: z.literal('custom'),
   run: z.string(),
   cwd: z.string().optional(),
-  env: z.record(z.string()).default({}),
+  env: z.record(z.string(), z.string()).default({}),
   metrics: z
     .record(
+      z.string(),
       z.object({
         unit: z.enum(['ms', 'bytes', 'kb', 'mb', 'count', 'score', 'rps', 'percent']).default('ms'),
         better: z.enum(['lower', 'higher']).default('lower'),
@@ -250,7 +251,7 @@ export const thresholdsSchema = z
     /** Above this coefficient of variation, an inconclusive result is `noisy`. */
     maxCv: z.number().positive().default(0.15),
   })
-  .default({});
+  .prefault({});
 export type Thresholds = z.infer<typeof thresholdsSchema>;
 
 const modelRuntimeSchema = z.object({
@@ -300,8 +301,8 @@ const roleBase = {
 
 export const agentsSchema = z
   .object({
-    scout: z.object({ ...roleBase, enabled: z.boolean().default(true), use: runtimeFor('scout') }).default({}),
-    analyst: z.object({ ...roleBase, enabled: z.boolean().default(true), use: runtimeFor('analyst') }).default({}),
+    scout: z.object({ ...roleBase, enabled: z.boolean().default(true), use: runtimeFor('scout') }).prefault({}),
+    analyst: z.object({ ...roleBase, enabled: z.boolean().default(true), use: runtimeFor('analyst') }).prefault({}),
     optimizer: z
       .object({
         ...roleBase,
@@ -322,7 +323,7 @@ export const agentsSchema = z
          */
         commitScope: z.string().optional(),
       })
-      .default({}),
+      .prefault({}),
     github: z
       .object({
         enabled: z.boolean().default(false),
@@ -330,7 +331,7 @@ export const agentsSchema = z
         pullRequests: z.enum(['draft', 'ready']).default('ready'),
         labels: z.array(z.string()).default(['speedpatrol']),
       })
-      .default({}),
+      .prefault({}),
     patrol: z
       .object({
         intervalMinutes: z.number().positive().default(30),
@@ -339,9 +340,9 @@ export const agentsSchema = z
         /** 0 = run until stopped. */
         cycles: z.number().int().nonnegative().default(0),
       })
-      .default({}),
+      .prefault({}),
   })
-  .default({});
+  .prefault({});
 
 export const configSchema = z.object({
   version: z.literal(1).default(1),
@@ -351,7 +352,7 @@ export const configSchema = z.object({
       /** The repository. Relative to the config file's folder's parent. */
       source: z.string().default('.'),
     })
-    .default({}),
+    .prefault({}),
   app: z
     .object({
       /** Plain-English guide for the agents: what the app is, what is critical. */
@@ -364,11 +365,11 @@ export const configSchema = z.object({
       /** Brings the app up before the benchmarks run, e.g. starts the server. */
       setup: z.array(appCommandSchema).default([]),
       teardown: z.array(appCommandSchema).default([]),
-      env: z.record(z.string()).default({}),
+      env: z.record(z.string(), z.string()).default({}),
       /** Env var names whose values are redacted from logs and never sent to a model. */
       secrets: z.array(z.string()).default([]),
     })
-    .default({}),
+    .prefault({}),
   defaults: z
     .object({
       iterations: z.number().int().positive().default(15),
@@ -377,7 +378,7 @@ export const configSchema = z.object({
       /** A/B compare: how many alternating rounds of base and head. */
       rounds: z.number().int().positive().default(8),
     })
-    .default({}),
+    .prefault({}),
   benchmarks: z.array(benchmarkSchema).default([]),
   thresholds: thresholdsSchema,
   agents: agentsSchema,

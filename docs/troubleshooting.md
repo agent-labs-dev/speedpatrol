@@ -18,7 +18,7 @@ Start with `speedpatrol doctor`. It checks Node, git, the config, the tools your
 
 **"The benchmark definitions changed between the runs."** The two sides were measured with different benchmark sets: you edited a benchmark, or you measured a subset (`run api.items`) against a run of all of them. The numbers are still right for the benchmarks both sides have.
 
-**`chromium for playwright: missing`, or a browser that disappears between runs.** A Playwright install of another version deletes the browsers of all other versions, Speedpatrol's included. Reinstall with `PLAYWRIGHT_SKIP_BROWSER_GC=1 npx -y playwright@1.64.1 install chromium`, and set `PLAYWRIGHT_SKIP_BROWSER_GC=1` for everything on the machine that installs browsers. On a shared machine, reinstall before each scheduled run: it does nothing when the browser is there.
+**`chromium for playwright: missing`, or a browser that disappears between runs.** A Playwright install of another version deletes the browsers of all other versions, Speedpatrol's included. Reinstall with `PLAYWRIGHT_SKIP_BROWSER_GC=1 npx -y playwright@1.65.1 install chromium`, and set `PLAYWRIGHT_SKIP_BROWSER_GC=1` for everything on the machine that installs browsers. On a shared machine, reinstall before each scheduled run: it does nothing when the browser is there.
 
 **An Electron benchmark cannot start a window on Linux.** There is no display. Run Xvfb and set `DISPLAY`.
 

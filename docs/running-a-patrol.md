@@ -34,7 +34,7 @@ To update: `git pull`, then the install and build commands again. Restart the da
 Then install Chromium for the `web` and `electron` benchmarks, one time:
 
 ```bash
-PLAYWRIGHT_SKIP_BROWSER_GC=1 npx -y playwright@1.64.1 install chromium
+PLAYWRIGHT_SKIP_BROWSER_GC=1 npx -y playwright@1.65.1 install chromium
 ```
 
 `PLAYWRIGHT_SKIP_BROWSER_GC=1` matters on a shared machine: without it, a Playwright install deletes the browsers of every other Playwright version, including the one that Speedpatrol uses. Set it in the environment of everything that runs on the machine.

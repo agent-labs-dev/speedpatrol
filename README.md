@@ -59,16 +59,16 @@ The dashboard (`npx speedpatrol dashboard`) shows the status of the project firs
 
 ## Quickstart
 
-Speedpatrol is on npm as [`speedpatrol`](https://www.npmjs.com/package/speedpatrol). The current release is **0.3.0** ([what's new](https://github.com/agent-labs-dev/speedpatrol/releases/tag/v0.3.0)). You need Node 22 or later and `git`. For `web` and `electron` benchmarks, install Chromium for Playwright once:
+Speedpatrol is on npm as [`speedpatrol`](https://www.npmjs.com/package/speedpatrol). The current release is **0.4.0** ([what's new](https://github.com/agent-labs-dev/speedpatrol/releases/tag/v0.4.0)). You need Node 22 or later and `git`. For `web` and `electron` benchmarks, install Chromium for Playwright once:
 
 ```bash
-PLAYWRIGHT_SKIP_BROWSER_GC=1 npx -y playwright@1.64.1 install chromium
+PLAYWRIGHT_SKIP_BROWSER_GC=1 npx -y playwright@1.65.1 install chromium
 ```
 
 Then, in your repo:
 
 ```bash
-npx speedpatrol@latest --version   # or pin it: npm install -D speedpatrol@0.3.0
+npx speedpatrol@latest --version   # or pin it: npm install -D speedpatrol@0.4.0
 npx speedpatrol init               # create .speedpatrol/ (--agent claude | codex | opencode)
 npx speedpatrol doctor             # check the config, git, the tools your commands run, Chromium, the agent CLIs
 npx speedpatrol scout              # the scout writes a benchmark for each critical path
