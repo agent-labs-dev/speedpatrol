@@ -199,6 +199,8 @@ export function shellQuote(value: string): string {
 export type Background = {
   child: ChildProcess;
   output: () => string;
+  /** True while the leader or any process of its group is alive. */
+  running(): boolean;
   stop(): Promise<void>;
 };
 
@@ -219,14 +221,15 @@ export function startBackground(command: string, cwd: string, env: Record<string
   child.stdout?.on('data', append);
   child.stderr?.on('data', append);
   child.on('error', (error) => append(Buffer.from(`${error.message}\n`)));
+  // The group can outlive its leader (a server backgrounded by the shell), so check both.
+  const pgid = child.pid;
+  const running = () =>
+    (child.exitCode === null && child.signalCode === null) || (pgid !== undefined && groupAlive(pgid));
   return {
     child,
     output: () => output,
+    running,
     async stop() {
-      // The group can outlive its leader (a server backgrounded by the shell), so wait for both.
-      const pgid = child.pid;
-      const running = () =>
-        (child.exitCode === null && child.signalCode === null) || (pgid !== undefined && groupAlive(pgid));
       const settle = async (ms: number) => {
         const deadline = Date.now() + ms;
         while (running() && Date.now() < deadline) await new Promise((done) => setTimeout(done, 25));

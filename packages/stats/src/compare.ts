@@ -10,7 +10,7 @@ import {
   type Verdict,
 } from '@speedpatrol/core';
 import { summarize, trimOutliers } from './summary.js';
-import { bootstrapDelta, mannWhitney, pairedSignTest } from './tests.js';
+import { bootstrapDelta, mannWhitney, pairedSignTest, signTestRounds } from './tests.js';
 
 export type MetricVerdict = Pick<
   MetricComparison,
@@ -114,7 +114,7 @@ export function compareRuns(baseRuns: readonly Run[], headRuns: readonly Run[], 
   if (machines.size > 1) warnings.push('The runs come from different machines: timings may not be comparable.');
   const hashes = new Set([...baseRuns, ...headRuns].map((run) => run.benchmarksHash));
   if (hashes.size > 1) warnings.push('The benchmark definitions changed between the runs.');
-  const minimumRounds = Math.floor(1 - Math.log2(options.thresholds.alpha)) + 1;
+  const minimumRounds = signTestRounds(options.thresholds.alpha);
   const headRun = headRuns[0];
   if (headRun?.source.dirty) warnings.push('The head checkout had uncommitted changes.');
 

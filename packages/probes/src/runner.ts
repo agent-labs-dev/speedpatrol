@@ -149,6 +149,8 @@ export async function measure(options: MeasureOptions): Promise<Run> {
         log,
         storeRoot: store.root,
       });
+      // A setup process that died mid-benchmark leaves numbers from something else.
+      app.assertRunning();
       run.results.push(result);
       await options.onResult?.(result);
     }

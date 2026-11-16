@@ -87,6 +87,20 @@ export function pairedSignTest(base: readonly number[], head: readonly number[])
   return { p: Math.min(1, 2 * tail), direction: Math.sign(positive - negative) };
 }
 
+/**
+ * The fewest paired rounds for which the exact two-sided sign test reaches
+ * p < alpha when `disagreeing` rounds point against the others. With no
+ * disagreeing round this is the minimum an A/B comparison needs; each
+ * disagreeing round tolerated costs more rounds.
+ */
+export function signTestRounds(alpha: number, disagreeing = 0): number {
+  if (!(alpha > 0 && alpha <= 1)) throw new Error(`alpha must be in (0, 1], got ${alpha}`);
+  for (let n = 2 * disagreeing + 1; ; n++) {
+    const head = Array.from({ length: n }, (_, i) => (i < disagreeing ? -1 : 1));
+    if (pairedSignTest(Array(n).fill(0), head).p < alpha) return n;
+  }
+}
+
 function resampleMedian(values: readonly number[], random: () => number): number {
   const sample = new Array<number>(values.length);
   for (let i = 0; i < values.length; i++) sample[i] = values[Math.floor(random() * values.length)]!;

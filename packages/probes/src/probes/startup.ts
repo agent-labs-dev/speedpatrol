@@ -20,6 +20,9 @@ export const startupProbe: ProbeFactory<'startup'> = (benchmark, context) => {
     if (benchmark.before) {
       await runTimed({ command: interpolate(benchmark.before, context.vars), cwd, env, timeoutMs: context.timeoutMs });
     }
+    if (readyUrl && (await urlAnswers(readyUrl))) {
+      throw new Error(`${readyUrl} already answers before ${command} started: another process is using it.`);
+    }
     const started = performance.now();
     const process = startBackground(command, cwd, { ...env, ...extra });
     try {
