@@ -1,6 +1,34 @@
+import { execFileSync } from 'node:child_process';
 import { once } from 'node:events';
+import { readFileSync } from 'node:fs';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { activeGroupCount, killAllGroups, killTree, runTimed, shellQuote, startBackground, waitUntil } from './exec.js';
+
+/** Whether the process is gone or a zombie: a killed orphan stays a zombie until its reaper waits for it. */
+function stopped(pid: number): boolean {
+  const signalable = () => {
+    try {
+      process.kill(pid, 0);
+      return true;
+    } catch {
+      return false;
+    }
+  };
+  if (!signalable()) return true;
+  let state: string;
+  try {
+    if (process.platform === 'linux') {
+      // "pid (comm) state ...": comm can hold spaces and ")".
+      const stat = readFileSync(`/proc/${pid}/stat`, 'utf8');
+      state = stat.slice(stat.lastIndexOf(')') + 2);
+    } else {
+      state = execFileSync('ps', ['-o', 'stat=', '-p', String(pid)], { encoding: 'utf8' }).trim();
+    }
+  } catch {
+    return !signalable(); // Reaped since the first check.
+  }
+  return state.startsWith('Z') || state.startsWith('X');
+}
 
 describe('process group cleanup', () => {
   let child: ReturnType<typeof startBackground> | undefined;
@@ -32,7 +60,7 @@ describe('process group cleanup', () => {
     killAllGroups('SIGTERM');
     killAllGroups('SIGKILL');
     await waitUntil(() => activeGroupCount() === 0, 2000, 'the group to die');
-    expect(() => process.kill(grandchild, 0)).toThrow();
+    expect(stopped(grandchild)).toBe(true);
   });
 
   // A zombie stays in its group until its parent waits for it. Here the
