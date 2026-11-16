@@ -1,17 +1,25 @@
 import { interpolate } from '@speedpatrol/core';
 import { quantile } from '@speedpatrol/stats';
+import { timeEventStream } from './sse.js';
 import type { ProbeFactory } from './types.js';
 
-async function once(url: string, init: RequestInit, expectStatus: number, timeoutMs: number) {
+async function once(
+  url: string,
+  init: RequestInit,
+  expectStatus: number,
+  timeoutMs: number,
+  stream?: { events: Record<string, string>; endEvent?: string },
+): Promise<Record<string, number>> {
   const started = performance.now();
   const response = await fetch(url, { ...init, signal: AbortSignal.timeout(timeoutMs) });
   const ttfb = performance.now() - started;
-  const body = await response.arrayBuffer();
-  const total = performance.now() - started;
   if (response.status !== expectStatus) {
+    await response.body?.cancel();
     throw new Error(`${init.method} ${url}: status ${response.status}, expected ${expectStatus}`);
   }
-  return { ttfb, total, bytes: body.byteLength };
+  if (stream) return { ...(await timeEventStream(response, started, stream)), ttfb_ms: ttfb };
+  const body = await response.arrayBuffer();
+  return { ttfb_ms: ttfb, total_ms: performance.now() - started, bytes: body.byteLength };
 }
 
 /**
@@ -35,27 +43,48 @@ export const httpProbe: ProbeFactory<'http'> = (benchmark, context) => {
       total_ms: { unit: 'ms', better: 'lower' },
       ttfb_ms: { unit: 'ms', better: 'lower' },
       bytes: { unit: 'bytes', better: 'lower' },
+      ...(benchmark.stream
+        ? Object.fromEntries(
+            ['first_event_ms', ...Object.keys(benchmark.stream.events)].map((name) => [
+              name,
+              { unit: 'ms' as const, better: 'lower' as const },
+            ]),
+          )
+        : {}),
       ...(concurrent
         ? { p95_ms: { unit: 'ms', better: 'lower' } as const, rps: { unit: 'rps', better: 'higher' } as const }
         : {}),
     },
     async sample(): Promise<Record<string, number>> {
       if (!concurrent) {
-        const { ttfb, total, bytes } = await once(url, init, benchmark.expectStatus, context.timeoutMs);
-        return { total_ms: total, ttfb_ms: ttfb, bytes };
+        return once(url, init, benchmark.expectStatus, context.timeoutMs, benchmark.stream);
       }
       const started = performance.now();
       const results = await Promise.all(
-        Array.from({ length: benchmark.concurrency }, () => once(url, init, benchmark.expectStatus, context.timeoutMs)),
+        Array.from({ length: benchmark.concurrency }, () =>
+          once(url, init, benchmark.expectStatus, context.timeoutMs, benchmark.stream),
+        ),
       );
       const wall = performance.now() - started;
-      const totals = results.map((result) => result.total).sort((a, b) => a - b);
-      const ttfbs = results.map((result) => result.ttfb).sort((a, b) => a - b);
+      const totals = results.map((result) => result.total_ms!).sort((a, b) => a - b);
+      const ttfbs = results.map((result) => result.ttfb_ms!).sort((a, b) => a - b);
+      const streamed = benchmark.stream
+        ? Object.fromEntries(
+            ['first_event_ms', ...Object.keys(benchmark.stream.events)].map((name) => [
+              name,
+              quantile(
+                results.map((result) => result[name]!).sort((a, b) => a - b),
+                0.5,
+              ),
+            ]),
+          )
+        : {};
       return {
+        ...streamed,
         total_ms: quantile(totals, 0.5),
         p95_ms: quantile(totals, 0.95),
         ttfb_ms: quantile(ttfbs, 0.5),
-        bytes: results[0]!.bytes,
+        bytes: results[0]!.bytes!,
         rps: (benchmark.concurrency * 1000) / wall,
       };
     },

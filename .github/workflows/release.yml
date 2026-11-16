@@ -18,8 +18,7 @@ on:
         default: patch
 
 permissions:
-  contents: write
-  id-token: write
+  contents: read
 
 concurrency:
   group: speedpatrol-release
@@ -28,13 +27,15 @@ concurrency:
 jobs:
   version:
     if: github.ref == 'refs/heads/main'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
     outputs:
       value: ${{ steps.version.outputs.value }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
+          persist-credentials: false
       # The newest v* tag holds the last release. The main rules do not let
       # this workflow push, so after a manual run the version on main can be
       # older than the tag. An empty value means there is nothing to release.
@@ -64,23 +65,26 @@ jobs:
   release:
     needs: version
     if: needs.version.outputs.value != ''
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
     # Must match the environment on the npm trusted publisher; the environment
     # itself only allows deployments from main.
     environment: npm
+    permissions:
+      contents: write
+      id-token: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
+          persist-credentials: false
       # packageManager owns the pnpm version; a second pin makes setup fail.
       - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: 22
+          node-version: 24
           registry-url: https://registry.npmjs.org
           cache: pnpm
-      # Trusted publishing needs npm 11.5.1 or later; Node 22 ships npm 10.
-      - run: npm install -g npm@^11.5.1
       - run: pnpm install --frozen-lockfile
       - run: pnpm build
       # The probe and agent tests drive real processes and a real Chromium.
@@ -88,17 +92,23 @@ jobs:
       - run: pnpm test
       - name: Set package version
         working-directory: packages/speedpatrol
-        run: npm version "${{ needs.version.outputs.value }}" --no-git-tag-version --allow-same-version
+        env:
+          VERSION: ${{ needs.version.outputs.value }}
+        run: npm version "$VERSION" --no-git-tag-version --allow-same-version
       # The Action on a release tag installs the speedpatrol of that release, so
       # the Action and the CLI always match. main keeps speedpatrol@latest.
       - name: Pin the Action to the new version
+        env:
+          VERSION: ${{ needs.version.outputs.value }}
         run: |
-          sed -i 's/^    default: speedpatrol@latest$/    default: speedpatrol@${{ needs.version.outputs.value }}/' action.yml
-          grep -qx '    default: speedpatrol@${{ needs.version.outputs.value }}' action.yml
+          sed -i "s/^    default: speedpatrol@latest$/    default: speedpatrol@$VERSION/" action.yml
+          grep -qx "    default: speedpatrol@$VERSION" action.yml
       - run: pnpm --filter speedpatrol build
       - name: Smoke test package
+        env:
+          VERSION: ${{ needs.version.outputs.value }}
         run: |
-          test "$(node packages/speedpatrol/dist/bin.js --version)" = "${{ needs.version.outputs.value }}"
+          test "$(node packages/speedpatrol/dist/bin.js --version)" = "$VERSION"
           node packages/speedpatrol/dist/bin.js --help
           (cd packages/speedpatrol && npm pack --dry-run)
       # No token: npm trusts this workflow through OIDC (id-token: write) and
@@ -112,7 +122,9 @@ jobs:
       - name: Commit and tag
         env:
           VERSION: ${{ needs.version.outputs.value }}
+          GH_TOKEN: ${{ github.token }}
         run: |
+          gh auth setup-git
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add packages/speedpatrol/package.json action.yml
@@ -124,4 +136,5 @@ jobs:
       - name: Create GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "v${{ needs.version.outputs.value }}" --generate-notes
+          VERSION: ${{ needs.version.outputs.value }}
+        run: gh release create "v$VERSION" --generate-notes

@@ -2,7 +2,7 @@ import { thresholdsSchema } from '@speedpatrol/core';
 import { describe, expect, it } from 'vitest';
 import { compareRuns, compareSamples, worstVerdict } from './compare.js';
 import { quantile, summarize, trimOutliers } from './summary.js';
-import { bootstrapDelta, mannWhitney, mulberry32 } from './tests.js';
+import { bootstrapDelta, mannWhitney, mulberry32, pairedSignTest } from './tests.js';
 
 const thresholds = thresholdsSchema.parse({});
 
@@ -89,39 +89,40 @@ describe('compareSamples', () => {
   }
 });
 
-it('reports medians from the same outlier-trimmed samples as the change', () => {
-  const run = (id: string, values: number[]) => ({
-    id,
-    purpose: 'compare' as const,
-    startedAt: '',
-    finishedAt: '',
-    source: { dir: '', sha: id, dirty: false },
-    machine: {
-      fingerprint: 'machine',
-      hostname: '',
-      platform: '',
-      arch: '',
-      cpuModel: '',
-      cpus: 1,
-      memoryGb: 1,
-      node: '',
+const run = (id: string, values: number[]) => ({
+  id,
+  purpose: 'compare' as const,
+  startedAt: '',
+  finishedAt: '',
+  source: { dir: '', sha: id, dirty: false },
+  machine: {
+    fingerprint: 'machine',
+    hostname: '',
+    platform: '',
+    arch: '',
+    cpuModel: '',
+    cpus: 1,
+    memoryGb: 1,
+    node: '',
+  },
+  benchmarksHash: 'hash',
+  results: [
+    {
+      benchmark: 'latency',
+      kind: 'command' as const,
+      primary: 'total',
+      iterations: values.length,
+      errors: [],
+      durationMs: 0,
+      critical: true,
+      metrics: { total: { unit: 'ms' as const, better: 'lower' as const, values, summary: summarize(values) } },
     },
-    benchmarksHash: 'hash',
-    results: [
-      {
-        benchmark: 'latency',
-        kind: 'command' as const,
-        primary: 'total',
-        iterations: values.length,
-        errors: [],
-        durationMs: 0,
-        critical: true,
-        metrics: { total: { unit: 'ms' as const, better: 'lower' as const, values, summary: summarize(values) } },
-      },
-    ],
-  });
+  ],
+});
+
+it('reports medians from the same outlier-trimmed samples as the change', () => {
   const metric = compareRuns([run('base', [9, 10, 11, 12, 13, 250])], [run('head', [18, 20, 22, 24, 26, 500])], {
-    mode: 'ab',
+    mode: 'baseline',
     thresholds,
     baseLabel: 'base',
     headLabel: 'head',
@@ -147,4 +148,35 @@ describe('worstVerdict', () => {
     expect(worstVerdict(['improvement', 'unchanged'])).toBe('improvement');
     expect(worstVerdict([])).toBe('missing');
   });
+});
+
+it('does not mistake iterations for independent A/B evidence', () => {
+  expect(pairedSignTest([100, 100, 100], [80, 80, 80]).p).toBeCloseTo(0.25);
+  expect(compareSamples([100, 100, 100], [80, 80, 80], 'lower', thresholds, true).verdict).not.toBe('improvement');
+  expect(compareSamples(Array(8).fill(100), Array(8).fill(80), 'lower', thresholds, true).verdict).toBe('improvement');
+  expect(pairedSignTest([100, 100, 100], [100, 100, 100]).p).toBe(1);
+  expect(pairedSignTest([100, 100, 100, 100], [80, 80, 120, 120]).p).toBe(1);
+});
+it('resamples paired rounds together in confidence intervals', () => {
+  expect(bootstrapDelta([1, 100, 10000], [2, 200, 20000], { paired: true })).toEqual([1, 1]);
+});
+
+it('A/B comparisons count rounds even when each round has hundreds of identical iterations', () => {
+  const base = [100, 100, 100].map((value, i) => run(`base${i}`, Array(200).fill(value)));
+  const head = [80, 80, 80].map((value, i) => run(`head${i}`, Array(200).fill(value)));
+  const metric = compareRuns(base, head, { mode: 'ab', thresholds, baseLabel: 'base', headLabel: 'head' }).metrics[0]!;
+  expect(metric.base?.n).toBe(3);
+  expect(metric.pValue).toBeCloseTo(0.25);
+  expect(metric.verdict).not.toBe('improvement');
+  expect(metric.deltaPct).toBe(metric.head!.median / metric.base!.median - 1);
+});
+
+it('retains complete paired rounds when a noncritical metric misses one round', () => {
+  const base = Array.from({ length: 16 }, (_, i) => run(`base${i}`, [100 + i]));
+  const head = Array.from({ length: 16 }, (_, i) => run(`head${i}`, i === 3 ? [] : [80 + i]));
+  const comparison = compareRuns(base, head, { mode: 'ab', thresholds, baseLabel: 'base', headLabel: 'head' });
+  expect(comparison.metrics[0]?.base?.n).toBe(15);
+  expect(comparison.metrics[0]?.head?.n).toBe(15);
+  expect(comparison.metrics[0]?.verdict).toBe('improvement');
+  expect(comparison.warnings).toContain('latency.total: omitted 1 incomplete paired rounds.');
 });

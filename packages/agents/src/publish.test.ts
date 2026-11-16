@@ -3,7 +3,7 @@ import { promisify } from 'node:util';
 import type { Comparison, Experiment, MetricComparison } from '@speedpatrol/core';
 import { describe, expect, it } from 'vitest';
 import { ensureLabels, experimentBody, experimentTitle } from './publish.js';
-import { subject } from './roles/optimizer.js';
+import { rejectionReason, subject } from './roles/optimizer.js';
 
 const exec = promisify(execFile);
 
@@ -47,22 +47,20 @@ describe('experimentTitle', () => {
     deltaPct: -0.114,
   } as Experiment;
 
-  it('names the change and the speed-up, not the metric', () => {
+  it('names the code change and leaves measurements in the body', () => {
     expect(experimentTitle({ ...experiment, title: 'fetch the user before the router loads' }, 'mobile')).toBe(
-      'perf(mobile): fetch the user before the router loads (11% faster)',
+      'perf(mobile): fetch the user before the router loads',
     );
   });
 
-  it('says smaller when the metric is a size', () => {
-    expect(experimentTitle({ ...experiment, title: 'drop the unused locale data' }, 'web', 'kb')).toBe(
-      'perf(web): drop the unused locale data (11% smaller)',
+  it('keeps size measurements out of the title too', () => {
+    expect(experimentTitle({ ...experiment, title: 'drop the unused locale data' }, 'web')).toBe(
+      'perf(web): drop the unused locale data',
     );
   });
 
   it('falls back to the benchmark when the optimizer gave no title', () => {
-    expect(experimentTitle(experiment, 'mobile.navigate')).toBe(
-      'perf(mobile.navigate): speed up mobile.navigate (11% faster)',
-    );
+    expect(experimentTitle(experiment, 'mobile.navigate')).toBe('perf(mobile.navigate): speed up mobile.navigate');
   });
 });
 
@@ -129,5 +127,17 @@ describe('experimentBody', () => {
 
   it('has no trade-offs section when no secondary metric got slower', () => {
     expect(tradeOffs(experimentBody(experiment, compare([target]), target))).toBeUndefined();
+  });
+});
+
+describe('verification rejection reason', () => {
+  it('asks for evidence when a large apparent gain is inconclusive', () => {
+    const target = { verdict: 'noisy', deltaPct: -0.12, pValue: 0.2, ci: [-0.2, 0.04] } as MetricComparison;
+    expect(rejectionReason(target, 0.05, 0.05)).toContain('not statistically conclusive');
+    expect(rejectionReason(target, 0.05, 0.05)).not.toContain('did not meet');
+  });
+  it('explains an insufficient effect separately', () => {
+    const target = { verdict: 'unchanged', deltaPct: -0.02, pValue: 0.001, ci: [-0.03, -0.01] } as MetricComparison;
+    expect(rejectionReason(target, 0.05, 0.05)).toContain('did not meet the 5%');
   });
 });

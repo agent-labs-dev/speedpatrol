@@ -10,11 +10,12 @@ All data is plain JSON under `.speedpatrol/runs/` (git ignores it), so the dashb
 | `regressions/<id>.json` | A **Regression**: benchmark, metric, good and bad sha, the confirming comparison, status (`open`, `filed`, `dismissed`, `fixed`), the analyst's title, analysis and suspects, the issue URL |
 | `experiments/<id>.json` | An **Experiment**: target, branch, worktree, base and head sha, hypothesis, summary, the verifying comparison, the change, collateral regressions, status (`proposed`, `measuring`, `improved`, `rejected`, `failed`, `published`), the PR URL |
 | `profiles/<run>/<benchmark>.cpuprofile` | The profile of the profiled iteration; open it in Chrome DevTools or speedscope |
+| `diagnostics/<run>/<id>.json` | Failed command output: redacted stdout and stderr, omitted-byte counts, command, exit code and timeout status; referenced by `results[].diagnostics` in the run |
 | `sessions/<id>/events.jsonl` | Each agent step: thought, tool call, tool result, cost |
 | `agents.json` | The current status of each role, with the writer's pid |
 | `patrol.json` | The last measured sha and the cycle count |
-| `checkouts/<sha>/` | Detached worktrees of measured commits |
-| `worktrees/<id>/` | Experiment worktrees |
+
+Full source checkouts, experiment worktrees and verification worktrees live under `$XDG_CACHE_HOME/speedpatrol/<profile-hash>/` (default `~/.cache/speedpatrol/`). The hash identifies the absolute configuration directory. Keeping source copies outside the measured repository prevents recursive linters and source walkers from discovering duplicate files. Reports and profiles remain in the local JSON store.
 
 ## A run, abridged
 

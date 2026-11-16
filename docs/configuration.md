@@ -27,7 +27,7 @@ defaults:
   iterations: 15
   warmup: 2
   timeoutMs: 60000
-  rounds: 2                 # A/B rounds
+  rounds: 8                 # Independent A/B rounds, default alpha 0.01
 benchmarks: []              # see below; the scout writes to benchmarks.json
 thresholds:
   relative: 0.05            # changes under 5% are never a verdict

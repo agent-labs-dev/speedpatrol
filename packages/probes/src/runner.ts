@@ -1,4 +1,5 @@
-import { mkdir } from 'node:fs/promises';
+import { randomUUID } from 'node:crypto';
+import { mkdir, writeFile } from 'node:fs/promises';
 import { loadavg } from 'node:os';
 import { join, relative } from 'node:path';
 import {
@@ -142,6 +143,7 @@ export async function measure(options: MeasureOptions): Promise<Run> {
         iterations: options.iterations ?? benchmark.iterations ?? defaults.iterations,
         warmup: options.iterations ? Math.min(1, defaults.warmup) : (benchmark.warmup ?? defaults.warmup),
         timeoutMs: benchmark.timeoutMs ?? defaults.timeoutMs,
+        diagnosticDir: store.path('diagnostics', id),
         profileDir: options.profile === false ? undefined : store.path('profiles', id),
         source,
         log,
@@ -184,6 +186,7 @@ type OneOptions = {
   warmup: number;
   timeoutMs: number;
   profileDir?: string;
+  diagnosticDir: string;
   source: string;
   storeRoot: string;
   log: (line: string) => void;
@@ -191,7 +194,55 @@ type OneOptions = {
 
 async function measureOne(benchmark: Benchmark, options: OneOptions): Promise<BenchmarkResult> {
   const { app, log } = options;
-  const probe = createProbe(benchmark, { source: options.source, vars: app.vars, timeoutMs: options.timeoutMs, log });
+  const diagnostics: NonNullable<BenchmarkResult['diagnostics']> = [];
+  let phase: 'warmup' | 'sample' | 'profile' = 'warmup';
+  let iteration = 1;
+  const probe = createProbe(benchmark, {
+    source: options.source,
+    vars: app.vars,
+    timeoutMs: options.timeoutMs,
+    log,
+    async commandFailure(command, output) {
+      const path = join(options.diagnosticDir, `${randomUUID()}.json`);
+      const stream = (text: string, omittedBytes = 0) => {
+        text = redact(text, app.secretValues);
+        // A capture boundary can split a secret. Remove any exact secret prefix at that boundary too.
+        if (omittedBytes) {
+          for (const secret of app.secretValues) {
+            if (secret.length < 4) continue;
+            for (let size = Math.min(secret.length - 1, text.length); size > 0; size--) {
+              if (text.endsWith(secret.slice(0, size))) {
+                text = `${text.slice(0, -size)}[redacted]`;
+                break;
+              }
+            }
+          }
+        }
+        return { text, omittedBytes };
+      };
+      const evidence = {
+        command: redact(command, app.secretValues),
+        code: output.code,
+        timedOut: output.timedOut,
+        stdout: stream(output.stdout, output.stdoutOmittedBytes),
+        stderr: stream(output.stderr, output.stderrOmittedBytes),
+      };
+      try {
+        await mkdir(options.diagnosticDir, { recursive: true });
+        await writeFile(path, `${JSON.stringify(evidence, null, 2)}\n`, { mode: 0o600 });
+        const relativePath = relative(options.storeRoot, path);
+        diagnostics.push({ path: relativePath, phase, iteration });
+        log(`${benchmark.id}: ${phase} ${iteration} diagnostics: ${relativePath}`);
+        return { path: relativePath, stdout: evidence.stdout.text, stderr: evidence.stderr.text };
+      } catch (error) {
+        return {
+          stdout: evidence.stdout.text,
+          stderr: evidence.stderr.text,
+          error: redact((error as Error).message, app.secretValues),
+        };
+      }
+    },
+  });
   const started = performance.now();
   const samples: Sample[] = [];
   let profile: BenchmarkResult['profile'];
@@ -203,6 +254,7 @@ async function measureOne(benchmark: Benchmark, options: OneOptions): Promise<Be
     let warmupError: string | undefined;
     let warmed = options.warmup === 0;
     for (let i = 0; i < options.warmup; i++) {
+      iteration = i + 1;
       try {
         await probe.sample();
         warmed = true;
@@ -212,8 +264,10 @@ async function measureOne(benchmark: Benchmark, options: OneOptions): Promise<Be
       }
     }
     if (!warmed) throw new Error(`Every warmup failed: ${warmupError}`);
+    phase = 'sample';
     let failures = 0;
     for (let i = 0; i < options.iterations; i++) {
+      iteration = i + 1;
       try {
         samples.push({ iteration: i, metrics: await probe.sample() });
       } catch (error) {
@@ -225,10 +279,17 @@ async function measureOne(benchmark: Benchmark, options: OneOptions): Promise<Be
       }
     }
     if (options.profileDir && benchmark.profile.enabled && probe.profile && samples.some((s) => !s.error)) {
+      phase = 'profile';
+      iteration = 1;
       await mkdir(options.profileDir, { recursive: true });
       try {
         const artifact = await probe.profile(join(options.profileDir, benchmark.id));
         if (artifact) profile = { ...artifact, path: relative(options.storeRoot, artifact.path) };
+        else if (benchmark.profile.mode === 'auto') {
+          log(
+            `${benchmark.id}: automatic profiling produced no Node CPU profile; for other runtimes set profile.mode to command and provide profile.command.`,
+          );
+        }
       } catch (error) {
         log(`${benchmark.id}: profile failed: ${redact((error as Error).message, app.secretValues)}`);
       }
@@ -240,6 +301,7 @@ async function measureOne(benchmark: Benchmark, options: OneOptions): Promise<Be
   }
   const result = toResult(benchmark, probe, samples, performance.now() - started);
   if (profile) result.profile = profile;
+  if (diagnostics.length) result.diagnostics = diagnostics;
   const primary = result.metrics[result.primary];
   log(
     primary

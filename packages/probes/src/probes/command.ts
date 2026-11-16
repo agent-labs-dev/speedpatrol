@@ -32,10 +32,14 @@ export const commandProbe: ProbeFactory<'command'> = (benchmark, context) => {
   const exec = async (extra: Record<string, string> = {}, run = command) => {
     if (before) await runTimed({ command: before, cwd, env, timeoutMs: context.timeoutMs });
     const result = await runTimed({ command: run, cwd, env: { ...env, ...extra }, timeoutMs: context.timeoutMs });
-    if (result.timedOut) throw new Error(`Timed out after ${context.timeoutMs} ms: ${command}`);
-    if (result.code !== 0) {
-      const tail = `${result.stdout}\n${result.stderr}`.trim().split('\n').slice(-5).join('\n');
-      throw new Error(`Exit ${result.code}: ${command}\n${tail}`);
+    if (result.timedOut || result.code !== 0) {
+      const reason = result.timedOut ? `Timed out after ${context.timeoutMs} ms` : `Exit ${result.code}`;
+      const evidence = await context.commandFailure?.(run, result);
+      // Each stream has its own preview budget: stderr cannot displace stdout.
+      const preview = `stdout:\n${(evidence?.stdout ?? result.stdout).slice(0, 2000)}\nstderr:\n${(evidence?.stderr ?? result.stderr).slice(0, 2000)}`;
+      throw new Error(
+        `${reason}: ${run}${evidence?.path ? `\nDiagnostics: ${evidence.path}` : ''}${evidence?.error ? `\nDiagnostics could not be saved: ${evidence.error}` : ''}\n${preview}`,
+      );
     }
     return result;
   };

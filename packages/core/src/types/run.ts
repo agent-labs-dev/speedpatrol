@@ -55,6 +55,8 @@ export type BenchmarkResult = {
   errors: string[];
   durationMs: number;
   profile?: ProfileArtifact;
+  /** Failed command attempts, including warmups and profiling; paths relative to runs/. */
+  diagnostics?: { path: string; phase: 'warmup' | 'sample' | 'profile'; iteration: number }[];
   critical: boolean;
 };
 

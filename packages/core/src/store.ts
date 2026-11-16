@@ -1,6 +1,8 @@
+import { createHash } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { appendFile, mkdir, readdir, readFile, rename, writeFile } from 'node:fs/promises';
-import { dirname, join } from 'node:path';
+import { homedir } from 'node:os';
+import { dirname, join, resolve } from 'node:path';
 import type { AgentEvent, AgentStatus, Experiment, Regression } from './types/agents.js';
 import type { Comparison } from './types/compare.js';
 import type { Run } from './types/run.js';
@@ -33,13 +35,21 @@ export type PatrolState = {
  */
 export class Store {
   readonly root: string;
+  private readonly workspaces: string;
 
   constructor(configDir: string) {
     this.root = join(configDir, 'runs');
+    const profile = createHash('sha256').update(resolve(configDir)).digest('hex');
+    this.workspaces = join(process.env.XDG_CACHE_HOME || join(homedir(), '.cache'), 'speedpatrol', profile);
   }
 
   path(...parts: string[]): string {
     return join(this.root, ...parts);
+  }
+
+  /** Full source copies stay outside the measured tree, where its linters cannot discover them. */
+  workspacePath(...parts: string[]): string {
+    return join(this.workspaces, ...parts);
   }
 
   private async write(file: string, value: unknown): Promise<void> {

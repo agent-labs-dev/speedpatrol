@@ -29,3 +29,25 @@ After the timed iterations, Speedpatrol runs one more iteration with a profiler 
 - `profile.mode: command` wraps a different profiler, for example `py-spy record -o {out} -- {cmd}`.
 
 Speedpatrol makes a summary of each profile as hotspots: the self time and the total time of each function. The analyst and the optimizer read the diff of two profiles.
+
+### Streamed agent turns
+
+Use an HTTP benchmark against a local or development backend that emits SSE. Declare the exact event names supplied by that backend; Speedpatrol does not infer tokens or tool calls from payload text.
+
+```yaml
+- id: agent.turn
+  kind: http
+  primary: ttft_ms
+  request:
+    url: http://127.0.0.1:8000/dev/turn
+    method: POST
+    headers: { Content-Type: application/json }
+    body: '{"prompt":"Read the local fixture"}'
+  stream:
+    events:
+      ttft_ms: token
+      first_tool_ms: tool_call
+    endEvent: turn_complete
+```
+
+`ttfb_ms` measures response headers. `first_event_ms` measures the first complete SSE data event, excluding heartbeats and comments. Each declared metric measures the first complete event of that name. `total_ms` ends at `endEvent`, then the connection is cancelled; without `endEvent`, it ends at EOF. Missing declared events, a missing completion event, a non-SSE response or a timeout fail the sample. Keep the event contract explicit: a backend whose first token is a JSON field in a generic `message` event needs a custom benchmark script to interpret that protocol.

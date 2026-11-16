@@ -26,7 +26,7 @@ export type MetricComparison = {
   deltaAbs: number;
   /** Bootstrap confidence interval of `deltaPct`. */
   ci: [number, number];
-  /** Mann-Whitney U, two-sided. */
+  /** Two-sided Mann-Whitney U for baselines, exact paired sign test for A/B rounds. */
   pValue: number;
   verdict: Verdict;
   /** Set on an `unchanged` metric whose change was significant but smaller than a threshold. */
@@ -39,7 +39,7 @@ export type Comparison = {
   id: string;
   createdAt: string;
   mode: ComparisonMode;
-  /** The run ids on each side. An A/B comparison pools several rounds. */
+  /** The run ids on each side. A/B inference uses one median per paired round. */
   base: { runs: string[]; sha: string; label: string };
   head: { runs: string[]; sha: string; label: string; dirty?: boolean };
   metrics: MetricComparison[];

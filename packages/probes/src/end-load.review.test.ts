@@ -31,6 +31,7 @@ vi.mock('./probes/index.js', () => ({
     primary: 'wall_ms',
     metrics: { wall_ms: { unit: 'ms', better: 'lower' } },
     sample: async () => ({ wall_ms: 100 }),
+    profile: async () => undefined,
   }),
 }));
 
@@ -52,6 +53,26 @@ it('warns when the machine becomes overloaded during a comparison run', async ()
     expect(run.failed).toBeUndefined();
     expect(run.machine.load).toEqual({ start: 0, end: 8 });
     expect(lines.join('\n')).toContain('Machine load 8.00 on 4 cores at end');
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+it('explains when automatic profiling cannot capture a non-Node command', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'profile-guidance-'));
+  try {
+    const config = configSchema.parse({
+      benchmarks: [{ id: 'native', kind: 'command', run: 'true' }],
+      defaults: { warmup: 0, iterations: 1 },
+    });
+    const lines: string[] = [];
+    await measure({
+      loaded: { config, source: root, dir: root, benchmarks: config.benchmarks },
+      store: new Store(root),
+      purpose: 'compare',
+      log: (line) => lines.push(line),
+    });
+    expect(lines.join('\n')).toContain('set profile.mode to command');
   } finally {
     await rm(root, { recursive: true, force: true });
   }

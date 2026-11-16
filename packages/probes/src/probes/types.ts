@@ -1,4 +1,5 @@
 import type { Benchmark, MetricSpec, ProfileArtifact } from '@speedpatrol/core';
+import type { ExecResult } from '../exec.js';
 
 export type ProbeContext = {
   /** The checkout the app runs from. */
@@ -7,6 +8,11 @@ export type ProbeContext = {
   vars: Record<string, string>;
   timeoutMs: number;
   log: (line: string) => void;
+  /** Persists redacted failure evidence and returns a runs-relative path. */
+  commandFailure?: (
+    command: string,
+    result: ExecResult,
+  ) => Promise<{ path?: string; stdout: string; stderr: string; error?: string }>;
 };
 
 /**

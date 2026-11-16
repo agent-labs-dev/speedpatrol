@@ -10,7 +10,7 @@ import {
   type Verdict,
 } from '@speedpatrol/core';
 import { summarize, trimOutliers } from './summary.js';
-import { bootstrapDelta, mannWhitney } from './tests.js';
+import { bootstrapDelta, mannWhitney, pairedSignTest } from './tests.js';
 
 export type MetricVerdict = Pick<
   MetricComparison,
@@ -29,20 +29,23 @@ export function compareSamples(
   head: readonly number[],
   better: Better,
   thresholds: Thresholds,
+  paired = false,
 ): MetricVerdict {
   if (base.length === 0 || head.length === 0) {
     return { deltaPct: 0, deltaAbs: 0, ci: [0, 0], pValue: 1, verdict: 'missing' };
   }
-  const b = trimOutliers(base);
-  const h = trimOutliers(head);
+  const b = paired ? base : trimOutliers(base);
+  const h = paired ? head : trimOutliers(head);
   const bs = summarize(b);
   const hs = summarize(h);
   const deltaAbs = hs.median - bs.median;
   const deltaPct = bs.median === 0 ? (hs.median === 0 ? 0 : Math.sign(deltaAbs)) : hs.median / bs.median - 1;
-  const ci = bootstrapDelta(b, h);
-  const { p } = mannWhitney(b, h);
+  const ci = bootstrapDelta(b, h, { paired });
+  const test = paired ? pairedSignTest(b, h) : mannWhitney(b, h);
+  const { p } = test;
   const excludesZero = ci[0] > 0 || ci[1] < 0;
-  const significant = p < thresholds.alpha && excludesZero;
+  const significant =
+    p < thresholds.alpha && excludesZero && (!('direction' in test) || test.direction === Math.sign(deltaAbs));
   const large = Math.abs(deltaPct) >= thresholds.relative && Math.abs(deltaAbs) >= thresholds.absolute;
   let verdict: Verdict;
   if (significant && large) {
@@ -111,6 +114,7 @@ export function compareRuns(baseRuns: readonly Run[], headRuns: readonly Run[], 
   if (machines.size > 1) warnings.push('The runs come from different machines: timings may not be comparable.');
   const hashes = new Set([...baseRuns, ...headRuns].map((run) => run.benchmarksHash));
   if (hashes.size > 1) warnings.push('The benchmark definitions changed between the runs.');
+  const minimumRounds = Math.floor(1 - Math.log2(options.thresholds.alpha)) + 1;
   const headRun = headRuns[0];
   if (headRun?.source.dirty) warnings.push('The head checkout had uncommitted changes.');
 
@@ -126,7 +130,26 @@ export function compareRuns(baseRuns: readonly Run[], headRuns: readonly Run[], 
       const bm = b?.metrics[name];
       const hm = h?.metrics[name];
       const spec = (hm ?? bm)!;
-      const result = compareSamples(bm?.values ?? [], hm?.values ?? [], spec.better, options.thresholds);
+      const paired = options.mode === 'ab';
+      const roundMedians = (runs: readonly Run[]) =>
+        runs.map((run) => {
+          const values = run.results.find((result) => result.benchmark === id)?.metrics[name]?.values;
+          return values?.length ? comparableSummary(values).median : undefined;
+        });
+      const br = roundMedians(baseRuns);
+      const hr = roundMedians(headRuns);
+      const pairs = br.flatMap((value, index) =>
+        value !== undefined && hr[index] !== undefined ? [[value, hr[index]!] as const] : [],
+      );
+      const dropped = Math.max(br.length, hr.length) - pairs.length;
+      if (paired && dropped) warnings.push(`${id}.${name}: omitted ${dropped} incomplete paired rounds.`);
+      if (paired && pairs.length < minimumRounds)
+        warnings.push(
+          `${id}.${name}: ${pairs.length} complete rounds; the exact sign test needs at least ${minimumRounds} non-tied rounds for p < ${options.thresholds.alpha}. This comparison is exploratory.`,
+        );
+      const bv = paired ? pairs.map(([value]) => value) : (bm?.values ?? []);
+      const hv = paired ? pairs.map(([, value]) => value) : (hm?.values ?? []);
+      const result = compareSamples(bv, hv, spec.better, options.thresholds, paired);
       metrics.push({
         benchmark: id,
         metric: name,
@@ -134,8 +157,8 @@ export function compareRuns(baseRuns: readonly Run[], headRuns: readonly Run[], 
         better: spec.better,
         primary: name === reference.primary,
         critical: reference.critical,
-        base: bm ? comparableSummary(bm.values) : undefined,
-        head: hm ? comparableSummary(hm.values) : undefined,
+        base: bv.length ? (paired ? summarize(bv) : comparableSummary(bv)) : undefined,
+        head: hv.length ? (paired ? summarize(hv) : comparableSummary(hv)) : undefined,
         ...result,
       });
     }

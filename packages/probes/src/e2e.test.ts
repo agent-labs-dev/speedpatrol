@@ -1,13 +1,23 @@
 import { execFileSync } from 'node:child_process';
 import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { homedir, tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { loadConfig, Store } from '@speedpatrol/core';
 import { chromium, errors } from 'playwright';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { abCompare, checkout, compareWithBaseline, recordBaseline } from './compare.js';
 import { runStep } from './probes/web.js';
 import { measure } from './runner.js';
+
+let cache: string;
+beforeAll(() => {
+  cache = mkdtempSync(join(homedir(), '.cache', 'speedpatrol-tests-'));
+  vi.stubEnv('XDG_CACHE_HOME', cache);
+});
+afterAll(() => {
+  vi.unstubAllEnvs();
+  rmSync(cache, { recursive: true, force: true });
+});
 
 const fixture = resolve(import.meta.dirname, '../../../examples/fixture-app');
 
@@ -103,7 +113,7 @@ describe('measure and compare the fixture app', () => {
       head: { label: 'main', dir: repo },
       only: ['api.items', 'api.health', 'cli.work'],
       iterations: 10,
-      rounds: 2,
+      rounds: 8,
       profile: false,
     });
     for (const result of runs.flatMap((run) => run.results)) expect(result.profile).toBeUndefined();

@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { loadConfig, Store } from '@speedpatrol/core';
@@ -49,6 +49,13 @@ benchmarks:
     expect(run.failed).toBeUndefined();
     expect(run.results[0]?.metrics.wall_ms?.values).toHaveLength(1);
     expect(run.results[0]?.profile).toBeUndefined();
+    const diagnostic = run.results[0]?.diagnostics?.[0];
+    expect(diagnostic?.phase).toBe('profile');
+    const evidence = readFileSync(join(loaded.dir, 'runs', diagnostic!.path), 'utf8');
+    expect(evidence).toContain('profile denied: [redacted]');
+    expect(evidence).toContain('credential=[redacted]');
+    expect(evidence).not.toContain('synthetic-captured-token');
+    expect(evidence).not.toContain('synthetic-configured-key');
   } finally {
     rmSync(repo, { recursive: true, force: true });
   }
