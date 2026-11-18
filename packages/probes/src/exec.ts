@@ -60,15 +60,28 @@ const live = (state: string | undefined) => state !== undefined && state[0] !== 
 
 type Process = { pid: number; state: string; pgrp: number; session: number };
 
-/** Every process on Linux, from /proc; undefined without /proc. */
-function linuxProcesses(): Process[] | undefined {
+/** Tasks the kernel has created since boot, from /proc/stat; undefined where it cannot be read. */
+function forkCount(): string | undefined {
+  try {
+    return readFileSync('/proc/stat', 'utf8').match(/^processes (\d+)$/m)?.[1];
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Every process on Linux, from /proc; undefined without /proc. `forkFree`: the kernel created no
+ * task (process or thread) while it was read, as the fork count is the same before and after.
+ */
+function linuxProcesses(): { processes: Process[]; forkFree: boolean } | undefined {
+  const forks = forkCount();
   let pids: string[];
   try {
     pids = readdirSync('/proc').filter((name) => /^\d+$/.test(name));
   } catch {
     return undefined;
   }
-  return pids.flatMap((pid) => {
+  const processes = pids.flatMap((pid) => {
     let stat: string;
     try {
       stat = readFileSync(`/proc/${pid}/stat`, 'utf8');
@@ -79,6 +92,7 @@ function linuxProcesses(): Process[] | undefined {
     const [state = '', , pgrp, session] = stat.slice(stat.lastIndexOf(')') + 2).split(' ');
     return [{ pid: Number(pid), state, pgrp: Number(pgrp), session: Number(session) }];
   });
+  return { processes, forkFree: forks !== undefined && forks === forkCount() };
 }
 
 /**
@@ -144,7 +158,7 @@ function groupGone(pgid: number): boolean {
 function hasLiveMember(pgid: number): boolean {
   if (process.platform === 'linux') {
     // No /proc to read: the signal check is all there is.
-    return linuxProcesses()?.some((proc) => proc.pgrp === pgid && live(proc.state)) ?? true;
+    return linuxProcesses()?.processes.some((proc) => proc.pgrp === pgid && live(proc.state)) ?? true;
   }
   try {
     const rows = execFileSync('ps', ['-A', '-o', 'pgid=', '-o', 'stat='], { encoding: 'utf8' });
@@ -188,8 +202,14 @@ function signalGroup(pgid: number, signal: NodeJS.Signals): boolean {
  * the session itself proves nothing about the rest of its group: a zombie can
  * have forked an unlisted child before it exited. A group that still exists keeps the
  * session tracked, unknown, until a later reading shows a live member or the
- * group goes. POSIX has no session-wide check, so a child that moves to a new
- * group during the reading is still missed. A signal check proves a group
+ * group goes, or a reading is fork-free. A fork-free /proc reading proves the
+ * session has no live process even while zombies hold its groups: the kernel
+ * created no task during it, so every process alive when it ends existed
+ * throughout it and was read, and one live at the end was live, and in the
+ * session (a session can only be left), when read. Zombies cannot fork, so no
+ * process can join the session after it. macOS has no fork count to bracket
+ * its reading with. Otherwise POSIX has no session-wide check, so a child that
+ * moves to a new group during the reading is missed. A signal check proves a group
  * exists, not that it is still the session's, so only groups a reading shows
  * are returned to be signalled.
  */
@@ -199,11 +219,12 @@ function sessionGroups(sid: number): number[] | undefined {
   if (seen === undefined) return [];
   // Every process: /proc where it exists (Linux), else on macOS ps and getsid(2).
   const proc = linuxProcesses();
-  const table = proc ?? (process.platform === 'darwin' ? macProcesses() : undefined);
+  const table = proc?.processes ?? (process.platform === 'darwin' ? macProcesses() : undefined);
   if (table === undefined) return undefined;
   const pgids = [...new Set(table.filter((p) => p.session === sid && live(p.state)).map((p) => p.pgrp))];
   for (const pgid of pgids) seen.add(pgid);
   if (pgids.length > 0) return pgids;
+  if (proc?.forkFree) seen.clear();
   // Checked after the reading, so a child forked during it is still in a group checked here.
   for (const pgid of seen) {
     // Only /proc gives a group and a session from one record: macOS reads them apart, so a pid
