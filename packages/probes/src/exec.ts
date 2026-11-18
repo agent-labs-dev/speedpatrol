@@ -36,7 +36,8 @@ const GNU_TIME = process.env.SPEEDPATROL_GNU_TIME ?? '/usr/bin/time';
 const groups = new Set<number>();
 // Session ids, tracked like groups: `script` starts a terminal app in a
 // session of its own, and the app's processes can leave its group (a job).
-const sessions = new Set<number>();
+// Each maps to the groups the session has had.
+const sessions = new Map<number, Set<number>>();
 
 /** True while a non-zombie process of the group exists; drops the id once none does. */
 function groupAlive(pgid: number): boolean {
@@ -113,14 +114,16 @@ function run(pids) {
 /** Every process on macOS, with its session; undefined when the table cannot be read. */
 function macProcesses(): Process[] | undefined {
   try {
-    const ps = execFileSync('ps', ['-A', '-o', 'pid=', '-o', 'pgid=', '-o', 'stat='], { encoding: 'utf8' });
+    // Bounded like a stop's own waits: these run synchronously, so a stalled one would block every deadline.
+    const options = { encoding: 'utf8', timeout: 5000 } as const;
+    const ps = execFileSync('ps', ['-A', '-o', 'pid=', '-o', 'pgid=', '-o', 'stat='], options);
     const pids = ps.split('\n').flatMap((row) =>
       row
         .trim()
         .split(/\s+/, 1)
         .filter((pid) => /^\d+$/.test(pid)),
     );
-    const sids = execFileSync('osascript', ['-l', 'JavaScript', '-e', GETSID_JXA, ...pids], { encoding: 'utf8' });
+    const sids = execFileSync('osascript', ['-l', 'JavaScript', '-e', GETSID_JXA, ...pids], options);
     return joinProcessRows(ps, sids);
   } catch {
     return undefined;
@@ -172,19 +175,30 @@ function signalGroup(pgid: number, signal: NodeJS.Signals): boolean {
 }
 
 /**
+ * The process groups of a session with a live member, from a reading of
+ * every process: /proc where it exists (Linux), else on macOS ps and
+ * getsid(2). With neither readable, the groups the session has had that
+ * still answer a signal are all there is.
+ */
+function readSession(sid: number, seen: Set<number>): number[] {
+  const table = linuxProcesses() ?? (process.platform === 'darwin' ? macProcesses() : undefined);
+  if (!table) return [...seen].filter(signalReaches);
+  return [...new Set(table.filter((p) => p.session === sid && live(p.state)).map((p) => p.pgrp))];
+}
+
+/**
  * The process groups of a session that still have a live member; drops the
- * id once none has. The session's processes come from /proc where it exists
- * (Linux), else on macOS from ps and getsid(2). With neither readable, the
- * signal check on the leader's own group is all there is.
+ * id once none has. A process of the session can fork and exit while the
+ * processes are read, so the reading misses its child; the child is still
+ * in its parent's group, though, so while a group the session had answers a
+ * signal, an empty reading is read again before it counts.
  */
 function sessionGroups(sid: number): number[] {
-  const table = linuxProcesses() ?? (process.platform === 'darwin' ? macProcesses() : undefined);
-  const pgids = table
-    ? [...new Set(table.filter((p) => p.session === sid && live(p.state)).map((p) => p.pgrp))]
-    : signalReaches(sid)
-      ? [sid]
-      : [];
+  const seen = sessions.get(sid) ?? new Set([sid]);
+  let pgids = readSession(sid, seen);
+  if (pgids.length === 0 && [...seen].some(signalReaches)) pgids = readSession(sid, seen);
   if (pgids.length === 0) sessions.delete(sid);
+  else for (const pgid of pgids) seen.add(pgid);
   return pgids;
 }
 
@@ -205,12 +219,12 @@ function signalSession(sid: number, signal: NodeJS.Signals): void {
 
 export function killAllGroups(signal: NodeJS.Signals): void {
   for (const pgid of groups) signalGroup(pgid, signal);
-  for (const sid of sessions) signalSession(sid, signal);
+  for (const sid of sessions.keys()) signalSession(sid, signal);
 }
 
 export function activeGroupCount(): number {
   for (const pgid of groups) groupAlive(pgid);
-  for (const sid of sessions) sessionGroups(sid);
+  for (const sid of sessions.keys()) sessionGroups(sid);
   return groups.size + sessions.size;
 }
 
@@ -373,7 +387,7 @@ export function startBackground(
       text += chunk.toString();
       if (!text.includes('\n')) return;
       sid = Number(text.split('\n')[0]);
-      sessions.add(sid);
+      sessions.set(sid, new Set([sid]));
       report.destroy();
       settle();
     });

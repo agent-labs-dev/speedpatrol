@@ -65,6 +65,8 @@ describe.runIf(process.platform === 'linux' || process.platform === 'darwin')('p
         // The sample resolves only after cleanup, so the child is already gone (a zombie at most).
         expect(stopped(pid)).toBe(true);
       } finally {
+        // A failed assertion above still leaves the child to clean up, if the app started it.
+        pid ??= Number((await readFile(pidFile, 'utf8').catch(() => '')).trim()) || undefined;
         if (pid !== undefined && !stopped(pid)) process.kill(pid, 'SIGKILL');
         await rm(dir, { recursive: true, force: true });
       }
