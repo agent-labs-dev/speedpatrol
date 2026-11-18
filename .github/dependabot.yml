@@ -18,3 +18,10 @@ updates:
     groups:
       dependencies:
         patterns: ['*']
+    ignore:
+      # @types/node tracks the oldest Node major the package supports
+      # (engines.node >=22, and CI runs Node 22). A newer major's types
+      # would let code call APIs that Node 22 lacks. Raise it together
+      # with engines.node and CI's node-version.
+      - dependency-name: '@types/node'
+        update-types: ['version-update:semver-major']
