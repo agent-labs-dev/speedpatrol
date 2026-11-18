@@ -186,24 +186,19 @@ function readSession(sid: number): number[] | undefined {
 
 /**
  * The process groups of a session that still have a live member; drops the
- * id once none has. A process of the session can fork and exit while the
- * processes are read, so the reading misses its child; the child is still
- * in its parent's group, though, so while a group the session had answers a
- * signal, an empty reading is read again before it counts. A group the
- * session had is never signalled on that answer alone: once it empties, its
- * id can go to another process. So without a reading the session stays
- * tracked while such a group answers, and only the leader's own group, whose
- * id the live session keeps reserved, is signalled.
+ * id once a reading shows none. A process of the session can fork and exit
+ * while the processes are read, so the reading misses its child; the child
+ * is still in its parent's group, though, so while a group the session had
+ * answers a signal, an empty reading is read again before it counts. Without
+ * a reading nothing is known: no group is signalled, since a signal check
+ * proves a group exists, not that it is still the session's, and the session
+ * stays tracked, so a stop and the shutdown read again within their deadlines.
  */
 function sessionGroups(sid: number): number[] {
   const seen = sessions.get(sid) ?? new Set([sid]);
-  const answers = () => [...seen].some(signalReaches);
   let pgids = readSession(sid);
-  if (pgids?.length === 0 && answers()) pgids = readSession(sid);
-  if (pgids === undefined) {
-    if (!answers()) sessions.delete(sid);
-    return signalReaches(sid) ? [sid] : [];
-  }
+  if (pgids?.length === 0 && [...seen].some(signalReaches)) pgids = readSession(sid);
+  if (pgids === undefined) return [];
   if (pgids.length === 0) sessions.delete(sid);
   else for (const pgid of pgids) seen.add(pgid);
   return pgids;
