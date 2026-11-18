@@ -113,33 +113,35 @@ function signalGroup(pgid: number, signal: NodeJS.Signals): boolean {
   }
 }
 
-/** The live processes of a session, by its exact id; drops the id once none is left. */
-function sessionMembers(sid: number): number[] {
-  let pids: number[];
-  if (process.platform === 'linux') {
-    pids = (linuxProcesses() ?? []).filter((proc) => proc.session === sid && live(proc.state)).map((proc) => proc.pid);
-  } else {
-    try {
-      // -s matches the session id exactly, not a command line.
-      pids = execFileSync('pgrep', ['-s', String(sid)], { encoding: 'utf8' })
-        .split('\n')
-        .filter(Boolean)
-        .map(Number);
-    } catch {
-      pids = []; // pgrep exits 1 when no process matches.
-    }
-  }
-  if (pids.length === 0) sessions.delete(sid);
-  return pids;
+/**
+ * The process groups of a session that still have a live member; drops the
+ * id once none has. Linux lists the session exactly. macOS has no listing by
+ * session (its pgrep lacks -s, its ps shows a kernel pointer), so there it is
+ * the session leader's own group, which holds every process the app starts
+ * outside a job of its own.
+ */
+function sessionGroups(sid: number): number[] {
+  const pgids =
+    process.platform === 'linux'
+      ? [...new Set((linuxProcesses() ?? []).filter((p) => p.session === sid && live(p.state)).map((p) => p.pgrp))]
+      : hasLiveMember(sid)
+        ? [sid]
+        : [];
+  if (pgids.length === 0) sessions.delete(sid);
+  return pgids;
 }
 
-/** A session has no kill(2) of its own, so each of its processes is signalled. */
+/**
+ * A session has no kill(2) of its own, so each of its groups is signalled: a
+ * group signal reaches every member at once, and a group id stays taken while
+ * the group has a member, unlike a bare pid.
+ */
 function signalSession(sid: number, signal: NodeJS.Signals): void {
-  for (const pid of sessionMembers(sid)) {
+  for (const pgid of sessionGroups(sid)) {
     try {
-      process.kill(pid, signal);
+      process.kill(-pgid, signal);
     } catch {
-      /* Exited since the listing. */
+      /* The group emptied since the listing. */
     }
   }
 }
@@ -151,7 +153,7 @@ export function killAllGroups(signal: NodeJS.Signals): void {
 
 export function activeGroupCount(): number {
   for (const pgid of groups) groupAlive(pgid);
-  for (const sid of sessions) sessionMembers(sid);
+  for (const sid of sessions) sessionGroups(sid);
   return groups.size + sessions.size;
 }
 
@@ -333,7 +335,7 @@ export function startBackground(
   const running = () =>
     (child.exitCode === null && child.signalCode === null) ||
     (pgid !== undefined && groupAlive(pgid)) ||
-    (sid !== undefined && sessionMembers(sid).length > 0);
+    (sid !== undefined && sessionGroups(sid).length > 0);
   const signal = (name: NodeJS.Signals) => {
     if (sid !== undefined) signalSession(sid, name);
     killTree(child, name);
@@ -347,8 +349,11 @@ export function startBackground(
         const deadline = Date.now() + ms;
         while (running() && Date.now() < deadline) await new Promise((done) => setTimeout(done, 25));
       };
-      // The session id is the first thing the command writes, so it is here before a stop can need it.
-      await reported;
+      // The session id is the first thing the command writes. A command stalled
+      // before writing it gets the same bound as the stop, then its group is stopped.
+      let bound: NodeJS.Timeout | undefined;
+      await Promise.race([reported, new Promise((done) => (bound = setTimeout(done, 5000)))]);
+      clearTimeout(bound);
       if (!running()) return;
       signal('SIGTERM');
       await settle(5000);
