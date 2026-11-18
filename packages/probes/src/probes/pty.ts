@@ -37,7 +37,8 @@ export function ptyCommand(command: string, cols: number, rows: number, platform
  * A terminal app, timed to an explicit marker. The app writes `marker` when
  * the measured output (a reply, a screen) is visible, and the clock stops at
  * its first appearance in the terminal output. The clock starts at the spawn,
- * or, with `ready`, when the app writes that marker; `input` is typed then.
+ * or, with `ready`, when the app writes that marker; `input` (which needs
+ * `ready`) is typed then, after the wrapper turned echo off.
  * Speedpatrol never guesses from what the screen shows: the app decides.
  */
 export const ptyProbe: ProbeFactory<'pty'> = (benchmark, context) => {

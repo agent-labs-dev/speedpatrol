@@ -191,7 +191,7 @@ const ptySchema = z
     before: z.string().optional(),
     /** Optional marker the app writes when it accepts input: the clock starts there. */
     ready: z.string().min(1).optional(),
-    /** Typed into the terminal when the clock starts. End it with `\r` to press Enter. */
+    /** Typed into the terminal when `ready` appears. End it with `\r` to press Enter. */
     input: z.string().optional(),
     /** Exact text the app writes when the measured output is visible. */
     marker: z.string().min(1),
@@ -202,6 +202,10 @@ const ptySchema = z
     // Input is typed with echo off, but an app may render what was typed. Checked again after interpolation.
     if (benchmark.input?.includes(benchmark.marker)) {
       ctx.addIssue({ code: 'custom', path: ['marker'], message: 'marker must not appear in input' });
+    }
+    // Typing before the app is ready races its start, and its terminal setup (echo off).
+    if (benchmark.input !== undefined && !benchmark.ready) {
+      ctx.addIssue({ code: 'custom', path: ['input'], message: 'input needs ready: it is typed when ready appears' });
     }
     if (benchmark.ready === benchmark.marker) {
       ctx.addIssue({ code: 'custom', path: ['marker'], message: 'marker must differ from ready' });

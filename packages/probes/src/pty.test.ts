@@ -36,8 +36,10 @@ describe('schema', () => {
     const parse = (fields: Record<string, unknown>) =>
       benchmarkSchema.safeParse({ id: 'tui', kind: 'pty', run: 'app', ...fields }).success;
     expect(parse({ marker: 'DONE' })).toBe(true);
-    expect(parse({ marker: 'DONE', input: 'say DONE\r' })).toBe(false);
+    expect(parse({ marker: 'DONE', ready: 'READY', input: 'say hi\r' })).toBe(true);
+    expect(parse({ marker: 'DONE', ready: 'READY', input: 'say DONE\r' })).toBe(false);
     expect(parse({ marker: 'DONE', ready: 'DONE' })).toBe(false);
+    expect(parse({ marker: 'DONE', input: 'hi\r' })).toBe(false);
   });
 
   it('fails the sample when an interpolated input brings the marker in', async () => {
@@ -45,6 +47,7 @@ describe('schema', () => {
       id: 'tui',
       kind: 'pty',
       run: 'app',
+      ready: 'READY',
       input: '${PROMPT}\r',
       marker: 'DONE',
     });
@@ -86,12 +89,13 @@ describe.runIf(process.platform === 'linux' || process.platform === 'darwin')('p
 
   it('types input with echo off, so only the app can write the marker', async () => {
     // With echo on, the typed \r would echo as \r\n and a control character as ^X at once.
-    // The app writes each marker 300 ms after ready; its own \n reaches the output as \r\n.
+    // The app's own \n reaches the output as \r\n.
     for (const [input, marker, write] of [
       ['hello\r', 'hello\r\n', 'hello\\n'],
       ['\x18', '^X', '^X'],
     ] as const) {
-      const app = `printf SP_READY; sleep 0.3; printf '${write}'; sleep 30`;
+      // The app waits for a typed byte before its 300 ms, so the delay starts after the clock.
+      const app = `printf SP_READY; read -r -s -n 1; sleep 0.3; printf '${write}'; sleep 30`;
       const result = await probe({ run: app, ready: 'SP_READY', input, marker }).sample();
       expect(result.marker_ms, JSON.stringify(input)).toBeGreaterThanOrEqual(300);
     }

@@ -68,7 +68,7 @@ A `pty` benchmark times a terminal app (a TUI or an interactive CLI) the way a p
   iterations: 15
 ```
 
-- The clock starts at the `ready` marker, or at the spawn when there is no `ready`. `ready_ms` is the time from the spawn to `ready`, and `marker_ms` (the primary metric) is the time from the start of the clock to `marker`.
+- The clock starts at the `ready` marker, or at the spawn when there is no `ready`. `input` needs `ready`: it is typed when the app says it accepts input, never during its start. `ready_ms` is the time from the spawn to `ready`, and `marker_ms` (the primary metric) is the time from the start of the clock to `marker`.
 - A marker matches as exact text, also when it arrives split across writes. The app must write it as one contiguous run of characters, with no styling or cursor movement inside it. It can be invisible to a person, for example inside an escape sequence the terminal ignores, as long as the bytes are contiguous.
 - Speedpatrol types `input` with terminal echo off, so typed text reaches the output only when the app writes it. An app may still render what was typed, so `marker` may not appear in `input` (also after `${NAME}` values are filled in), and `ready` and `marker` must differ.
 - Gate the markers behind a flag or environment variable of your own, so they appear only in benchmark runs.
