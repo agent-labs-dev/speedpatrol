@@ -174,41 +174,43 @@ function signalGroup(pgid: number, signal: NodeJS.Signals): boolean {
   }
 }
 
-/**
- * The process groups of a session with a live member, from a reading of
- * every process: /proc where it exists (Linux), else on macOS ps and
- * getsid(2); undefined when neither can be read.
- */
-function readSession(sid: number): number[] | undefined {
-  const table = linuxProcesses() ?? (process.platform === 'darwin' ? macProcesses() : undefined);
-  return table && [...new Set(table.filter((p) => p.session === sid && live(p.state)).map((p) => p.pgrp))];
+/** Every process: /proc where it exists (Linux), else on macOS ps and getsid(2); undefined when neither can be read. */
+function readProcesses(): Process[] | undefined {
+  return linuxProcesses() ?? (process.platform === 'darwin' ? macProcesses() : undefined);
 }
 
 /**
- * The process groups of a session that still have a live member; drops the
- * id once a reading shows none. A process of the session can fork and exit
- * while the processes are read, so the reading misses its child; the child
- * is still in its parent's group, though, so while a group the session had
- * answers a signal, an empty reading is read again before it counts. Without
- * a reading nothing is known: no group is signalled, since a signal check
- * proves a group exists, not that it is still the session's, and the session
- * stays tracked, so a stop and the shutdown read again within their deadlines,
- * and the result is undefined.
+ * The process groups of a session that still have a live member, from a
+ * reading of every process; undefined while that is unknown. A reading alone
+ * cannot prove a session empty: a process of it can fork and exit while the
+ * processes are read, and the reading misses its child. The child starts in
+ * its parent's group, though, and a group signal check cannot race. So an
+ * empty reading drops the id only once each group the session has had is
+ * accounted for: it answers no signal, or the reading shows its members
+ * (zombies, or another session's processes once the id is reused). A group
+ * that answers but that the reading did not show keeps the session tracked,
+ * unknown, until a later reading settles it. A signal check proves a group
+ * exists, not that it is still the session's, so only groups a reading shows
+ * are returned to be signalled.
  */
 function sessionGroups(sid: number): number[] | undefined {
   const seen = sessions.get(sid) ?? new Set([sid]);
-  let pgids = readSession(sid);
-  if (pgids?.length === 0 && [...seen].some(signalReaches)) pgids = readSession(sid);
-  if (pgids === undefined) return undefined;
-  if (pgids.length === 0) sessions.delete(sid);
-  else for (const pgid of pgids) seen.add(pgid);
-  return pgids;
+  const table = readProcesses();
+  if (table === undefined) return undefined;
+  const pgids = [...new Set(table.filter((p) => p.session === sid && live(p.state)).map((p) => p.pgrp))];
+  for (const pgid of pgids) seen.add(pgid);
+  if (pgids.length > 0) return pgids;
+  // Checked after the reading, so a child forked during it is still in a group checked here.
+  for (const pgid of seen) if (!signalReaches(pgid) || table.some((p) => p.pgrp === pgid)) seen.delete(pgid);
+  if (seen.size > 0) return undefined;
+  sessions.delete(sid);
+  return [];
 }
 
 /**
  * A session has no kill(2) of its own, so each of its groups is signalled: a
  * group signal reaches every member at once, and a group id stays taken while
- * the group has a member, unlike a bare pid. False when no reading backed it.
+ * the group has a member, unlike a bare pid. False when no reading showed the groups.
  */
 function signalSession(sid: number, signal: NodeJS.Signals): boolean {
   const pgids = sessionGroups(sid);
@@ -448,14 +450,14 @@ export function startBackground(
       await settle(5000);
       if (sid === undefined) return;
       // A last reading confirms the session is empty. One that finds a live group (after readings
-      // that failed) gets the SIGKILL they could not send, and the stop still fails: nothing confirmed it.
+      // that could not show it) gets the SIGKILL they could not send, and the stop still fails.
       const left = sessionGroups(sid);
       if (left?.length === 0) return;
       if (left) signalSession(sid, 'SIGKILL');
       throw new Error(
         left
           ? 'The terminal app was still running after SIGKILL'
-          : 'Could not read the process table to confirm the terminal app stopped',
+          : 'Could not confirm from the process table that the terminal app stopped',
       );
     },
   };
