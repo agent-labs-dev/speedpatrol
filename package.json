@@ -19,8 +19,8 @@
     "check": "biome check .",
     "check:fix": "biome check --write .",
     "knip": "knip --no-config-hints",
-    "gate": "pnpm check && pnpm build && pnpm knip && pnpm test",
-    "gate:changed": "biome check --no-errors-on-unmatched $(git diff --name-only --diff-filter=d $(git merge-base origin/main HEAD)) && pnpm build && pnpm knip && vitest run --changed $(git merge-base origin/main HEAD)",
+    "gate": "pnpm check --error-on-warnings && pnpm build && pnpm knip && pnpm test",
+    "gate:changed": "{ git diff -z --name-only --diff-filter=d \"$(git merge-base origin/main HEAD)\"; git ls-files -z --others --exclude-standard; } | xargs -0 -r biome check --no-errors-on-unmatched --error-on-warnings && pnpm build && pnpm knip && vitest run --changed $(git merge-base origin/main HEAD)",
     "prepare": "husky"
   },
   "devDependencies": {
