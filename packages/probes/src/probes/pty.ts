@@ -1,5 +1,5 @@
 import { StringDecoder } from 'node:string_decoder';
-import { interpolate, type MetricSpec } from '@speedpatrol/core';
+import { inputEchoesMarker, interpolate, type MetricSpec } from '@speedpatrol/core';
 import { runTimed, shellQuote, startBackground } from '../exec.js';
 import { resolveCwd, resolveEnv } from './command.js';
 import type { ProbeFactory } from './types.js';
@@ -45,6 +45,8 @@ export const ptyProbe: ProbeFactory<'pty'> = (benchmark, context) => {
   const command = ptyCommand(interpolate(benchmark.run, context.vars), benchmark.cols, benchmark.rows);
   const before = benchmark.before ? interpolate(benchmark.before, context.vars) : undefined;
   const input = benchmark.input === undefined ? undefined : interpolate(benchmark.input, context.vars);
+  // The schema checked the input as written; a `${NAME}` value can still bring the marker in.
+  const echoed = inputEchoesMarker(input, benchmark.marker);
   const metrics: Record<string, MetricSpec> = { marker_ms: { unit: 'ms', better: 'lower' } };
   if (benchmark.ready) metrics.ready_ms = { unit: 'ms', better: 'lower' };
 
@@ -52,6 +54,7 @@ export const ptyProbe: ProbeFactory<'pty'> = (benchmark, context) => {
     primary: 'marker_ms',
     metrics,
     async sample() {
+      if (echoed) throw new Error('The terminal echo of input contains the marker, so the echo would stop the clock');
       if (before) await runTimed({ command: before, cwd, env, timeoutMs: context.timeoutMs });
       const started = performance.now();
       const app = startBackground(command, cwd, env, { input: true });

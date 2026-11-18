@@ -38,6 +38,26 @@ describe('schema', () => {
     expect(parse({ marker: 'DONE' })).toBe(true);
     expect(parse({ marker: 'DONE', input: 'say DONE\r' })).toBe(false);
     expect(parse({ marker: 'DONE', ready: 'DONE' })).toBe(false);
+    // A typed \r echoes as \r\n.
+    expect(parse({ marker: 'hello\r\n', input: 'hello\r' })).toBe(false);
+  });
+
+  it('fails the sample when an interpolated input brings the marker into the echo', async () => {
+    const benchmark = benchmarkSchema.parse({
+      id: 'tui',
+      kind: 'pty',
+      run: 'app',
+      input: '${PROMPT}\r',
+      marker: 'DONE',
+    });
+    if (benchmark.kind !== 'pty') throw new Error('Expected pty');
+    const sample = ptyProbe(benchmark, {
+      source: '.',
+      vars: { PROMPT: 'DONE' },
+      timeoutMs: 1000,
+      log: () => {},
+    }).sample();
+    await expect(sample).rejects.toThrow('echo of input contains the marker');
   });
 });
 

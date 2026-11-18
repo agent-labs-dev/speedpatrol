@@ -70,7 +70,7 @@ A `pty` benchmark times a terminal app (a TUI or an interactive CLI) the way a p
 
 - The clock starts at the `ready` marker, or at the spawn when there is no `ready`. `ready_ms` is the time from the spawn to `ready`, and `marker_ms` (the primary metric) is the time from the start of the clock to `marker`.
 - A marker matches as exact text, also when it arrives split across writes. The app must write it as one contiguous run of characters, with no styling or cursor movement inside it. It can be invisible to a person, for example inside an escape sequence the terminal ignores, as long as the bytes are contiguous.
-- The terminal echoes typed input, so `marker` may not appear in `input`, and `ready` and `marker` must differ.
+- The terminal echoes typed input, so `marker` may not appear in `input` or its echo (a typed `\r` echoes as `\r\n`), also after `${NAME}` values are filled in, and `ready` and `marker` must differ.
 - Gate the markers behind a flag or environment variable of your own, so they appear only in benchmark runs.
 - The app runs with `TERM=xterm-256color` (overridable in `env`) on a `cols` by `rows` terminal (default 120 by 40). Each iteration starts a fresh process and stops its process group after the marker.
 - An app that exits before the marker, or a marker that does not appear within `timeoutMs`, fails the sample.

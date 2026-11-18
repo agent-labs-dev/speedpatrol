@@ -153,6 +153,8 @@ function stepCommands(config: SpeedpatrolConfig, benchmarks: Benchmark[]): Step[
       if (benchmark.kind !== 'custom' && benchmark.before) {
         steps.push({ run: benchmark.before, cwd: benchmark.cwd, env: benchmark.env, usedBy });
       }
+      // The pty probe starts `script` with the benchmark's own env and cwd.
+      if (benchmark.kind === 'pty') steps.push({ run: 'script', cwd: benchmark.cwd, env: benchmark.env, usedBy });
       if (benchmark.profile.command) {
         steps.push({ run: benchmark.profile.command, cwd: benchmark.cwd, env: benchmark.env, usedBy });
       }
@@ -240,7 +242,6 @@ export async function doctor(cwd: string, log: (line: string) => void): Promise<
     if (kinds.has('android')) check('adb', await version('adb', ['version']), true);
     if (kinds.has('ios')) check('xcrun simctl', await version('xcrun', ['simctl', 'help']), true);
     if (kinds.has('maestro')) check('maestro', await version('maestro'), true);
-    if (kinds.has('pty')) check('script for the pty probe', await locate('script', loaded.source, process.env), true);
     const agents = loaded.config.agents;
     for (const [role, settings] of Object.entries({
       scout: agents.scout,
