@@ -187,9 +187,11 @@ function readProcesses(): Process[] | undefined {
  * process of it can fork and exit while the processes are read, and the
  * reading misses its child. The child starts in its parent's group, though,
  * and a group signal check is atomic. So an empty reading drops the id only
- * once each group the session has had is gone (ESRCH). A row the reading
- * shows proves nothing about the rest of its group: a zombie can have forked
- * an unlisted child before it exited. A group that still exists keeps the
+ * once each group the session has had is gone: a signal check finds it gone
+ * (ESRCH), or the reading shows its id in another session, which a group
+ * only gets once it has emptied, as a group lies within one session. A row of
+ * the session itself proves nothing about the rest of its group: a zombie can
+ * have forked an unlisted child before it exited. A group that still exists keeps the
  * session tracked, unknown, until a later reading shows a live member or the
  * group goes. POSIX has no session-wide check, so a child that moves to a new
  * group during the reading is still missed. A signal check proves a group
@@ -206,7 +208,9 @@ function sessionGroups(sid: number): number[] | undefined {
   for (const pgid of pgids) seen.add(pgid);
   if (pgids.length > 0) return pgids;
   // Checked after the reading, so a child forked during it is still in a group checked here.
-  for (const pgid of seen) if (groupGone(pgid)) seen.delete(pgid);
+  for (const pgid of seen) {
+    if (groupGone(pgid) || table.some((p) => p.pgrp === pgid && p.session !== sid)) seen.delete(pgid);
+  }
   if (seen.size > 0) return undefined;
   sessions.delete(sid);
   return [];
