@@ -57,8 +57,10 @@ function groupAlive(pgid: number): boolean {
 
 const live = (state: string | undefined) => state !== undefined && state[0] !== 'Z' && state[0] !== 'X';
 
+type Process = { pid: number; state: string; pgrp: number; session: number };
+
 /** Every process on Linux, from /proc; undefined without /proc. */
-function linuxProcesses(): { pid: number; state: string; pgrp: number; session: number }[] | undefined {
+function linuxProcesses(): Process[] | undefined {
   let pids: string[];
   try {
     pids = readdirSync('/proc').filter((name) => /^\d+$/.test(name));
@@ -76,6 +78,50 @@ function linuxProcesses(): { pid: number; state: string; pgrp: number; session: 
     const [state = '', , pgrp, session] = stat.slice(stat.lastIndexOf(')') + 2).split(' ');
     return [{ pid: Number(pid), state, pgrp: Number(pgrp), session: Number(session) }];
   });
+}
+
+/** Rows of "pid pgid sid state", as `PS_SESSIONS` prints them; a row of any other shape is skipped. */
+export function parseProcessRows(text: string): Process[] {
+  return text.split('\n').flatMap((row) => {
+    const [pid, pgrp, session, state, extra] = row.trim().split(/\s+/);
+    const ids = [pid, pgrp, session].map(Number);
+    if (extra !== undefined || state === undefined || !ids.every((id) => Number.isInteger(id) && id > 0)) return [];
+    return [{ pid: ids[0]!, pgrp: ids[1]!, session: ids[2]!, state }];
+  });
+}
+
+// ps lists every process with its group and state. No ps column gives the
+// session where there is no /proc: macOS documents `sess` as the session ID,
+// but its ps prints the kernel's eproc e_sess pointer, which xnu leaves zero,
+// and its pgrep has no -s. getsid(2) answers for any pid, so perl, which macOS
+// ships, asks it per process through syscall(2). The script's argument is the
+// getsid syscall number: 310 on macOS (xnu bsd/kern/syscalls.master).
+const PS_SESSIONS = `
+open(my $ps, '-|', 'ps', '-A', '-o', 'pid=', '-o', 'pgid=', '-o', 'stat=') or exit 1;
+while (<$ps>) {
+  my ($pid, $pgid, $state) = split;
+  my $sid = syscall($ARGV[0] + 0, $pid + 0);
+  print "$pid $pgid $sid $state\\n" if $sid > 0;
+}
+close($ps) or exit 1;
+`;
+
+/** Every process, with its session, from ps and getsid(2); undefined when they cannot be read. */
+export function psProcesses(getsid = 310): Process[] | undefined {
+  try {
+    return parseProcessRows(execFileSync('perl', ['-e', PS_SESSIONS, String(getsid)], { encoding: 'utf8' }));
+  } catch {
+    return undefined;
+  }
+}
+
+function signalReaches(pgid: number): boolean {
+  try {
+    process.kill(-pgid, 0);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /** Whether a member of the group is in any state but zombie (Z) or dead (X). */
@@ -115,18 +161,17 @@ function signalGroup(pgid: number, signal: NodeJS.Signals): boolean {
 
 /**
  * The process groups of a session that still have a live member; drops the
- * id once none has. Linux lists the session exactly. macOS has no listing by
- * session (its pgrep lacks -s, its ps shows a kernel pointer), so there it is
- * the session leader's own group, which holds every process the app starts
- * outside a job of its own.
+ * id once none has. The session's processes come from /proc where it exists
+ * (Linux), else from ps and getsid(2) (macOS). With neither readable, the
+ * signal check on the leader's own group is all there is.
  */
 function sessionGroups(sid: number): number[] {
-  const pgids =
-    process.platform === 'linux'
-      ? [...new Set((linuxProcesses() ?? []).filter((p) => p.session === sid && live(p.state)).map((p) => p.pgrp))]
-      : hasLiveMember(sid)
-        ? [sid]
-        : [];
+  const table = linuxProcesses() ?? psProcesses();
+  const pgids = table
+    ? [...new Set(table.filter((p) => p.session === sid && live(p.state)).map((p) => p.pgrp))]
+    : signalReaches(sid)
+      ? [sid]
+      : [];
   if (pgids.length === 0) sessions.delete(sid);
   return pgids;
 }

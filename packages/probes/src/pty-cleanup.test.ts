@@ -1,27 +1,35 @@
+import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { benchmarkSchema } from '@speedpatrol/core';
 import { describe, expect, it } from 'vitest';
-import { shellQuote } from './exec.js';
-import { ptyProbe } from './probes/pty.js';
+import { activeGroupCount, killAllGroups, shellQuote, startBackground, waitUntil } from './exec.js';
+import { ptyCommand, ptyProbe } from './probes/pty.js';
 
+/** Whether the process is gone or a zombie. */
 function stopped(pid: number): boolean {
   try {
-    const stat = readFileSync(`/proc/${pid}/stat`, 'utf8');
-    return /^[ZX]/.test(stat.slice(stat.lastIndexOf(')') + 2));
+    if (process.platform === 'linux') {
+      const stat = readFileSync(`/proc/${pid}/stat`, 'utf8');
+      return /^[ZX]/.test(stat.slice(stat.lastIndexOf(')') + 2));
+    }
+    const state = execFileSync('ps', ['-o', 'stat=', '-p', String(pid)], { encoding: 'utf8' }).trim();
+    return state === '' || /^[ZX]/.test(state);
   } catch {
     return true;
   }
 }
 
 // How the app starts a child that outlives it: plainly, ignoring the hangup
-// the terminal sends when it closes, and in a job of its own (another group).
+// the terminal sends when it closes, in a job of its own (another group), and
+// in a job of its own that ignores the hangup.
 const children = {
   plain: 'sleep 60 &',
   'ignoring SIGHUP': "(trap '' HUP; exec sleep 60) &",
   'in its own group': 'set -m; sleep 60 & set +m;',
+  'in its own group ignoring SIGHUP': "set -m; (trap '' HUP; exec sleep 60) & set +m;",
 };
 const ends = {
   marker: { tail: 'printf SP_DONE; wait', error: undefined },
@@ -29,7 +37,7 @@ const ends = {
   error: { tail: 'exit 3', error: 'Exited with code' },
 };
 
-describe.runIf(process.platform === 'linux')('pty process cleanup', () => {
+describe.runIf(process.platform === 'linux' || process.platform === 'darwin')('pty process cleanup', () => {
   it.each(Object.keys(children).flatMap((child) => Object.keys(ends).map((end) => [child, end])))(
     'stops a child started %s after the %s',
     async (child, end) => {
@@ -62,4 +70,24 @@ describe.runIf(process.platform === 'linux')('pty process cleanup', () => {
       }
     },
   );
+
+  it('tracks the session for shutdown until its last process stops', async () => {
+    // The leader exits at once, so its group empties; the job lives on in a group of its own.
+    const command = ptyCommand('set -m; (trap \'\' HUP; exec sleep 60) & echo "job $!"', 80, 24);
+    const app = startBackground(command, process.cwd(), {}, { input: true, session: true });
+    let pid: number | undefined;
+    try {
+      await waitUntil(() => /job \d+/.test(app.output()), 5000, 'the job pid');
+      pid = Number(app.output().match(/job (\d+)/)![1]);
+      await waitUntil(() => app.child.exitCode !== null, 5000, 'the session leader to exit');
+      expect(stopped(pid)).toBe(false);
+      expect(app.running()).toBe(true);
+      expect(activeGroupCount()).toBeGreaterThan(0);
+      killAllGroups('SIGKILL');
+      await waitUntil(() => activeGroupCount() === 0, 5000, 'the session to empty');
+      expect(stopped(pid)).toBe(true);
+    } finally {
+      if (pid !== undefined && !stopped(pid)) process.kill(pid, 'SIGKILL');
+    }
+  });
 });
