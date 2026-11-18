@@ -180,17 +180,6 @@ const electronSchema = z.object({
  * explicit marker contract: the app writes `marker` when the moment being
  * measured is on screen, and the clock stops at its first appearance.
  */
-/**
- * Whether the terminal's echo of typed input can contain the marker. A
- * terminal in its default mode echoes each typed character, and a typed `\r`
- * or `\n` as `\r\n`, so both forms are checked; such a marker would match
- * the echo instead of the app's output.
- */
-export function inputEchoesMarker(input: string | undefined, marker: string): boolean {
-  if (!input) return false;
-  return input.includes(marker) || input.replace(/[\r\n]/g, '\r\n').includes(marker);
-}
-
 const ptySchema = z
   .object({
     ...common,
@@ -210,9 +199,9 @@ const ptySchema = z
     rows: z.number().int().positive().default(40),
   })
   .superRefine((benchmark, ctx) => {
-    // Checked again after `${NAME}` interpolation, when the probe is created.
-    if (inputEchoesMarker(benchmark.input, benchmark.marker)) {
-      ctx.addIssue({ code: 'custom', path: ['marker'], message: 'marker must not appear in the echo of input' });
+    // Input is typed with echo off, but an app may render what was typed. Checked again after interpolation.
+    if (benchmark.input?.includes(benchmark.marker)) {
+      ctx.addIssue({ code: 'custom', path: ['marker'], message: 'marker must not appear in input' });
     }
     if (benchmark.ready === benchmark.marker) {
       ctx.addIssue({ code: 'custom', path: ['marker'], message: 'marker must differ from ready' });

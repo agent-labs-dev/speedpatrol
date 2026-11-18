@@ -1,5 +1,5 @@
 import { StringDecoder } from 'node:string_decoder';
-import { inputEchoesMarker, interpolate, type MetricSpec } from '@speedpatrol/core';
+import { interpolate, type MetricSpec } from '@speedpatrol/core';
 import { runTimed, shellQuote, startBackground } from '../exec.js';
 import { resolveCwd, resolveEnv } from './command.js';
 import type { ProbeFactory } from './types.js';
@@ -21,12 +21,13 @@ export class MarkerScan {
 }
 
 /**
- * Wraps a command so it runs on a pseudo-terminal of the given size. `script`
- * (util-linux on Linux, BSD on macOS) owns the terminal, so Speedpatrol needs
- * no native module.
+ * Wraps a command so it runs on a pseudo-terminal of the given size, with
+ * echo off: typed input never reaches the output unless the app writes it, so
+ * only the app can write the marker. `script` (util-linux on Linux, BSD on
+ * macOS) owns the terminal, so Speedpatrol needs no native module.
  */
 export function ptyCommand(command: string, cols: number, rows: number, platform = process.platform): string {
-  const inner = `stty cols ${cols} rows ${rows} 2>/dev/null; exec bash -c ${shellQuote(command)}`;
+  const inner = `stty cols ${cols} rows ${rows} -echo 2>/dev/null; exec bash -c ${shellQuote(command)}`;
   if (platform === 'linux') return `exec script -qfec ${shellQuote(inner)} /dev/null`;
   if (platform === 'darwin') return `exec script -qF /dev/null bash -c ${shellQuote(inner)}`;
   throw new Error(`The pty probe runs on Linux and macOS, not ${platform}`);
@@ -46,7 +47,7 @@ export const ptyProbe: ProbeFactory<'pty'> = (benchmark, context) => {
   const before = benchmark.before ? interpolate(benchmark.before, context.vars) : undefined;
   const input = benchmark.input === undefined ? undefined : interpolate(benchmark.input, context.vars);
   // The schema checked the input as written; a `${NAME}` value can still bring the marker in.
-  const echoed = inputEchoesMarker(input, benchmark.marker);
+  const typedMarker = input?.includes(benchmark.marker) ?? false;
   const metrics: Record<string, MetricSpec> = { marker_ms: { unit: 'ms', better: 'lower' } };
   if (benchmark.ready) metrics.ready_ms = { unit: 'ms', better: 'lower' };
 
@@ -54,7 +55,7 @@ export const ptyProbe: ProbeFactory<'pty'> = (benchmark, context) => {
     primary: 'marker_ms',
     metrics,
     async sample() {
-      if (echoed) throw new Error('The terminal echo of input contains the marker, so the echo would stop the clock');
+      if (typedMarker) throw new Error('The input contains the marker, so typing it could stop the clock');
       if (before) {
         const prepared = await runTimed({ command: before, cwd, env, timeoutMs: context.timeoutMs });
         if (prepared.timedOut || prepared.code !== 0) {

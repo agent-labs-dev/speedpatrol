@@ -24,7 +24,7 @@ describe('MarkerScan', () => {
 describe('ptyCommand', () => {
   it('wraps the command in script for Linux and macOS and refuses elsewhere', () => {
     expect(ptyCommand('app', 80, 24, 'linux')).toBe(
-      `exec script -qfec 'stty cols 80 rows 24 2>/dev/null; exec bash -c '\\''app'\\''' /dev/null`,
+      `exec script -qfec 'stty cols 80 rows 24 -echo 2>/dev/null; exec bash -c '\\''app'\\''' /dev/null`,
     );
     expect(ptyCommand('app', 80, 24, 'darwin')).toMatch(/^exec script -qF \/dev\/null bash -c /);
     expect(() => ptyCommand('app', 80, 24, 'win32')).toThrow('Linux and macOS');
@@ -32,18 +32,15 @@ describe('ptyCommand', () => {
 });
 
 describe('schema', () => {
-  it('refuses a marker the input would echo, and a marker equal to ready', () => {
+  it('refuses a marker inside the input, and a marker equal to ready', () => {
     const parse = (fields: Record<string, unknown>) =>
       benchmarkSchema.safeParse({ id: 'tui', kind: 'pty', run: 'app', ...fields }).success;
     expect(parse({ marker: 'DONE' })).toBe(true);
     expect(parse({ marker: 'DONE', input: 'say DONE\r' })).toBe(false);
     expect(parse({ marker: 'DONE', ready: 'DONE' })).toBe(false);
-    // A typed \r echoes as \r\n.
-    expect(parse({ marker: 'hello\r\n', input: 'hello\r' })).toBe(false);
-    expect(parse({ marker: 'hello\r\n', input: 'hello\n' })).toBe(false);
   });
 
-  it('fails the sample when an interpolated input brings the marker into the echo', async () => {
+  it('fails the sample when an interpolated input brings the marker in', async () => {
     const benchmark = benchmarkSchema.parse({
       id: 'tui',
       kind: 'pty',
@@ -58,7 +55,7 @@ describe('schema', () => {
       timeoutMs: 1000,
       log: () => {},
     }).sample();
-    await expect(sample).rejects.toThrow('echo of input contains the marker');
+    await expect(sample).rejects.toThrow('input contains the marker');
   });
 });
 
@@ -85,6 +82,19 @@ describe.runIf(process.platform === 'linux' || process.platform === 'darwin')('p
     expect(result.ready_ms).toBeGreaterThan(0);
     expect(result.marker_ms).toBeGreaterThanOrEqual(300);
     expect(result.marker_ms).toBeLessThan(5000);
+  });
+
+  it('types input with echo off, so only the app can write the marker', async () => {
+    // With echo on, the typed \r would echo as \r\n and a control character as ^X at once.
+    // The app writes each marker 300 ms after ready; its own \n reaches the output as \r\n.
+    for (const [input, marker, write] of [
+      ['hello\r', 'hello\r\n', 'hello\\n'],
+      ['\x18', '^X', '^X'],
+    ] as const) {
+      const app = `printf SP_READY; sleep 0.3; printf '${write}'; sleep 30`;
+      const result = await probe({ run: app, ready: 'SP_READY', input, marker }).sample();
+      expect(result.marker_ms, JSON.stringify(input)).toBeGreaterThanOrEqual(300);
+    }
   });
 
   it('times from the spawn without a ready marker', async () => {
