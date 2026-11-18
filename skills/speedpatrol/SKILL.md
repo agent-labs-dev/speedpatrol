@@ -59,7 +59,7 @@ Either run the scout:
 npx speedpatrol@latest scout
 ```
 
-or write them yourself in `benchmarks:` (see https://github.com/agent-labs-dev/speedpatrol/blob/main/docs/configuration.md). Aim for 5 to 15, and mark the few most important ones `critical: true`. Kinds: `http`, `web` (page load + `steps` for screen navigation), `electron`, `startup`, `command`, `android`, `ios`, `maestro`, `custom`.
+or write them yourself in `benchmarks:` (see https://github.com/agent-labs-dev/speedpatrol/blob/main/docs/configuration.md). Aim for 5 to 15, and mark the few most important ones `critical: true`. Kinds: `http`, `web` (page load + `steps` for screen navigation), `electron`, `startup`, `command`, `android`, `ios`, `maestro`, `custom`, `pty` (a terminal app timed to a marker the app writes).
 
 ### 2.4 Prove it
 

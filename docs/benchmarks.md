@@ -13,6 +13,7 @@ A benchmark is one critical path and the method to measure it. Its `kind` select
 | `maestro` | A mobile screen journey (a Maestro flow) | `flow_ms` |
 | `command` | A build, a test run, a CLI command | `wall_ms`, `cpu_user_ms`, `cpu_sys_ms`, `max_rss_mb` |
 | `custom` | Any script that prints `{"metrics": {...}}` (k6, hyperfine, your own) | the metrics that it declares |
+| `pty` | A terminal app in a pseudo-terminal, to a marker that the app writes | `marker_ms`, `ready_ms` |
 
 Web throttling (`cpuThrottle`, `network: 4g | fast-3g | slow-3g`) uses the Chrome DevTools presets.
 
@@ -51,3 +52,27 @@ Use an HTTP benchmark against a local or development backend that emits SSE. Dec
 ```
 
 `ttfb_ms` measures response headers. `first_event_ms` measures the first complete SSE data event, excluding heartbeats and comments. Each declared metric measures the first complete event of that name. `total_ms` ends at `endEvent`, then the connection is cancelled; without `endEvent`, it ends at EOF. Missing declared events, a missing completion event, a non-SSE response or a timeout fail the sample. Keep the event contract explicit: a backend whose first token is a JSON field in a generic `message` event needs a custom benchmark script to interpret that protocol.
+
+### Terminal first replies
+
+A `pty` benchmark times a terminal app (a TUI or an interactive CLI) the way a person sees it: on a pseudo-terminal. The measurement is a contract between the app and the benchmark. The app writes an exact marker string when the moment being measured is on screen, for example right after it renders the first visible part of a reply, and Speedpatrol records the time to that marker's first appearance in the terminal output. Speedpatrol does not read the screen to guess when a reply has started.
+
+```yaml
+- id: tui.first-reply
+  kind: pty
+  run: node dist/cli.js chat
+  env: { API_URL: http://127.0.0.1:8000, APP_BENCH_MARKERS: "1" }
+  ready: SP_READY          # the app writes this when it accepts input
+  input: "hello\r"         # typed when ready appears; \r presses Enter
+  marker: SP_REPLY         # the app writes this when the first reply is visible
+  iterations: 15
+```
+
+- The clock starts at the `ready` marker, or at the spawn when there is no `ready`. `ready_ms` is the time from the spawn to `ready`, and `marker_ms` (the primary metric) is the time from the start of the clock to `marker`.
+- A marker matches as exact text, also when it arrives split across writes. The app must write it as one contiguous run of characters, with no styling or cursor movement inside it. It can be invisible to a person, for example inside an escape sequence the terminal ignores, as long as the bytes are contiguous.
+- The terminal echoes typed input, so `marker` may not appear in `input`, and `ready` and `marker` must differ.
+- Gate the markers behind a flag or environment variable of your own, so they appear only in benchmark runs.
+- The app runs with `TERM=xterm-256color` (overridable in `env`) on a `cols` by `rows` terminal (default 120 by 40). Each iteration starts a fresh process and stops its process group after the marker.
+- An app that exits before the marker, or a marker that does not appear within `timeoutMs`, fails the sample.
+- The terminal comes from `script` (util-linux on Linux, BSD on macOS), which `speedpatrol doctor` checks for. Windows is not supported.
+- Run it against a local or development backend: every iteration is a real turn. Replies from a model vary, so expect a higher cv than a CPU benchmark and raise `iterations` until the primary metric stays under `maxCv`; a noisy run is not recorded as a baseline.

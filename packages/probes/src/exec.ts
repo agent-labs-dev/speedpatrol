@@ -243,13 +243,18 @@ export type Background = {
   stop(): Promise<void>;
 };
 
-/** Starts a long-running command in its own process group. */
-export function startBackground(command: string, cwd: string, env: Record<string, string>): Background {
+/** Starts a long-running command in its own process group. `input` gives it a writable stdin. */
+export function startBackground(
+  command: string,
+  cwd: string,
+  env: Record<string, string>,
+  options: { input?: boolean } = {},
+): Background {
   const child = spawn('bash', ['-c', command], {
     cwd,
     env: commandEnv(env),
     detached: true,
-    stdio: ['ignore', 'pipe', 'pipe'],
+    stdio: [options.input ? 'pipe' : 'ignore', 'pipe', 'pipe'],
   });
   registerGroup(child);
   let output = '';
