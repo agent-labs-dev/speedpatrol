@@ -36,7 +36,9 @@ const GNU_TIME = process.env.SPEEDPATROL_GNU_TIME ?? '/usr/bin/time';
 const groups = new Set<number>();
 // Session ids, tracked like groups: `script` starts a terminal app in a
 // session of its own, and the app's processes can leave its group (a job).
-const sessions = new Set<number>();
+// Each maps to the groups the session has had, and the fork count read before
+// the spawn that started it (see linuxProcesses).
+const sessions = new Map<number, { groups: Set<number>; forksBefore: bigint | undefined }>();
 
 /** True while a non-zombie process of the group exists; drops the id once none does. */
 function groupAlive(pgid: number): boolean {
@@ -59,25 +61,83 @@ const live = (state: string | undefined) => state !== undefined && state[0] !== 
 
 type Process = { pid: number; state: string; pgrp: number; session: number };
 
-/** Every process on Linux, from /proc; undefined without /proc. */
-function linuxProcesses(): Process[] | undefined {
+/** Tasks the kernel has created since boot, from /proc/stat; undefined where it cannot be read. */
+function forkCount(): bigint | undefined {
+  try {
+    const count = readFileSync('/proc/stat', 'utf8').match(/^processes (\d+)$/m)?.[1];
+    return count === undefined ? undefined : BigInt(count);
+  } catch {
+    return undefined;
+  }
+}
+
+/** Whether this /proc hides other users' processes or their stat files (the hidepid mount option). */
+function procHides(): boolean {
+  try {
+    const mount = readFileSync('/proc/self/mountinfo', 'utf8')
+      .split('\n')
+      .find((line) => line.split(' ')[4] === '/proc');
+    const option = mount?.split(' - ')[1]?.match(/hidepid=(\w+)/)?.[1];
+    return mount === undefined || (option !== undefined && option !== '0' && option !== 'off');
+  } catch {
+    return true;
+  }
+}
+
+/** A task's state, pgrp and session from its stat file: "pid (comm) state ppid pgrp session ...". */
+function readStat(path: string): { state: string; pgrp: string | undefined; session: string | undefined } {
+  const stat = readFileSync(path, 'utf8');
+  // comm can hold spaces and ")".
+  const [state = '', , pgrp, session] = stat.slice(stat.lastIndexOf(')') + 2).split(' ');
+  return { state, pgrp, session };
+}
+
+const exited = (error: unknown) => ['ENOENT', 'ESRCH'].includes((error as NodeJS.ErrnoException).code ?? '');
+
+/** The state of a live thread of the process, if one is left; a thread that exits meanwhile is skipped. */
+function liveThreadState(pid: string): string | undefined {
+  for (const tid of readdirSync(`/proc/${pid}/task`)) {
+    try {
+      const { state } = readStat(`/proc/${pid}/task/${tid}/stat`);
+      if (live(state)) return state;
+    } catch (error) {
+      if (!exited(error)) throw error;
+    }
+  }
+  return undefined;
+}
+
+/**
+ * Every process on Linux, from /proc; undefined without /proc. A process whose main thread has
+ * exited reads as a zombie while its other threads run, so its state is a live thread's.
+ * `complete`: the reading saw every process: the kernel created no task (process or thread)
+ * while it was read, as the fork count is the same before and after, /proc hides none, and each
+ * stat file it could not read belonged to a process that had exited. The count is trusted only
+ * once it is proven to advance: it must exceed `forksBefore`, a count read before a fork. Some
+ * kernels (gVisor) report a constant count, which would make every reading look fork-free.
+ */
+function linuxProcesses(forksBefore?: bigint): { processes: Process[]; complete: boolean } | undefined {
+  const forks = forkCount();
   let pids: string[];
   try {
     pids = readdirSync('/proc').filter((name) => /^\d+$/.test(name));
   } catch {
     return undefined;
   }
-  return pids.flatMap((pid) => {
-    let stat: string;
+  let complete = forks !== undefined && forksBefore !== undefined && forks > forksBefore && !procHides();
+  const processes = pids.flatMap((pid) => {
+    let row: ReturnType<typeof readStat>;
     try {
-      stat = readFileSync(`/proc/${pid}/stat`, 'utf8');
-    } catch {
-      return []; // Exited since the listing.
+      row = readStat(`/proc/${pid}/stat`);
+      if (!live(row.state)) row.state = liveThreadState(pid) ?? row.state;
+    } catch (error) {
+      // Exited since the listing; any other failure leaves the process unknown.
+      if (!exited(error)) complete = false;
+      return [];
     }
-    // "pid (comm) state ppid pgrp session ...": comm can hold spaces and ")".
-    const [state = '', , pgrp, session] = stat.slice(stat.lastIndexOf(')') + 2).split(' ');
-    return [{ pid: Number(pid), state, pgrp: Number(pgrp), session: Number(session) }];
+    return [{ pid: Number(pid), state: row.state, pgrp: Number(row.pgrp), session: Number(row.session) }];
   });
+  return { processes, complete: complete && forks === forkCount() };
 }
 
 /**
@@ -113,26 +173,29 @@ function run(pids) {
 /** Every process on macOS, with its session; undefined when the table cannot be read. */
 function macProcesses(): Process[] | undefined {
   try {
-    const ps = execFileSync('ps', ['-A', '-o', 'pid=', '-o', 'pgid=', '-o', 'stat='], { encoding: 'utf8' });
+    // Bounded like a stop's own waits: these run synchronously, so a stalled one would block every deadline.
+    const options = { encoding: 'utf8', timeout: 5000 } as const;
+    const ps = execFileSync('ps', ['-A', '-o', 'pid=', '-o', 'pgid=', '-o', 'stat='], options);
     const pids = ps.split('\n').flatMap((row) =>
       row
         .trim()
         .split(/\s+/, 1)
         .filter((pid) => /^\d+$/.test(pid)),
     );
-    const sids = execFileSync('osascript', ['-l', 'JavaScript', '-e', GETSID_JXA, ...pids], { encoding: 'utf8' });
+    const sids = execFileSync('osascript', ['-l', 'JavaScript', '-e', GETSID_JXA, ...pids], options);
     return joinProcessRows(ps, sids);
   } catch {
     return undefined;
   }
 }
 
-function signalReaches(pgid: number): boolean {
+/** Only ESRCH proves a group gone: EPERM means a process of it exists under other credentials. */
+function groupGone(pgid: number): boolean {
   try {
     process.kill(-pgid, 0);
-    return true;
-  } catch {
     return false;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === 'ESRCH';
   }
 }
 
@@ -140,7 +203,7 @@ function signalReaches(pgid: number): boolean {
 function hasLiveMember(pgid: number): boolean {
   if (process.platform === 'linux') {
     // No /proc to read: the signal check is all there is.
-    return linuxProcesses()?.some((proc) => proc.pgrp === pgid && live(proc.state)) ?? true;
+    return linuxProcesses()?.processes.some((proc) => proc.pgrp === pgid && live(proc.state)) ?? true;
   }
   try {
     const rows = execFileSync('ps', ['-A', '-o', 'pgid=', '-o', 'stat='], { encoding: 'utf8' });
@@ -172,29 +235,66 @@ function signalGroup(pgid: number, signal: NodeJS.Signals): boolean {
 }
 
 /**
- * The process groups of a session that still have a live member; drops the
- * id once none has. The session's processes come from /proc where it exists
- * (Linux), else on macOS from ps and getsid(2). With neither readable, the
- * signal check on the leader's own group is all there is.
+ * The process groups of a session that still have a live member, from a
+ * reading of every process; undefined while that is unknown, and empty for a
+ * session already dropped. A reading alone cannot prove a session empty: a
+ * process of it can fork and exit while the processes are read, and the
+ * reading misses its child. The child starts in its parent's group, though,
+ * and a group signal check is atomic. So an empty reading drops the id only
+ * once each group the session has had is gone: a signal check finds it gone
+ * (ESRCH), or a /proc reading shows its id in another session, which a group
+ * only gets once it has emptied, as a group lies within one session. A row of
+ * the session itself proves nothing about the rest of its group: a zombie can
+ * have forked an unlisted child before it exited. A group that still exists keeps the
+ * session tracked, unknown, until a later reading shows a live member or the
+ * group goes, or a reading is complete. A complete /proc reading proves the
+ * session has no live process even while zombies hold its groups: the kernel
+ * created no task during it, so every process alive when it ends existed
+ * throughout it and was read, and one live at the end was live, and in the
+ * session (a session can only be left), when read. Zombies cannot fork, so no
+ * process can join the session after it. The fork count proves this only once
+ * it is seen to advance past its value before the session's spawn, a fork; a
+ * count that never moves (gVisor reports 0) leaves every reading incomplete.
+ * macOS has no fork count to bracket its reading with. Otherwise POSIX has no session-wide check, so a child that
+ * moves to a new group during the reading is missed. A signal check proves a group
+ * exists, not that it is still the session's, so only groups a reading shows
+ * are returned to be signalled.
  */
-function sessionGroups(sid: number): number[] {
-  const table = linuxProcesses() ?? (process.platform === 'darwin' ? macProcesses() : undefined);
-  const pgids = table
-    ? [...new Set(table.filter((p) => p.session === sid && live(p.state)).map((p) => p.pgrp))]
-    : signalReaches(sid)
-      ? [sid]
-      : [];
-  if (pgids.length === 0) sessions.delete(sid);
-  return pgids;
+function sessionGroups(sid: number): number[] | undefined {
+  const session = sessions.get(sid);
+  // Dropped once proven empty: the id may since belong to another session.
+  if (session === undefined) return [];
+  const seen = session.groups;
+  // Every process: /proc where it exists (Linux), else on macOS ps and getsid(2).
+  const proc = linuxProcesses(session.forksBefore);
+  const table = proc?.processes ?? (process.platform === 'darwin' ? macProcesses() : undefined);
+  if (table === undefined) return undefined;
+  const pgids = [...new Set(table.filter((p) => p.session === sid && live(p.state)).map((p) => p.pgrp))];
+  for (const pgid of pgids) seen.add(pgid);
+  if (pgids.length > 0) return pgids;
+  if (proc?.complete) seen.clear();
+  // Checked after the reading, so a child forked during it is still in a group checked here.
+  for (const pgid of seen) {
+    // Only /proc gives a group and a session from one record: macOS reads them apart, so a pid
+    // reused between the two pairs one process's group with another's session.
+    const elsewhere = proc !== undefined && table.some((p) => p.pgrp === pgid && p.session !== sid);
+    if (groupGone(pgid) || elsewhere) seen.delete(pgid);
+  }
+  if (seen.size > 0) return undefined;
+  sessions.delete(sid);
+  return [];
 }
 
 /**
  * A session has no kill(2) of its own, so each of its groups is signalled: a
  * group signal reaches every member at once, and a group id stays taken while
- * the group has a member, unlike a bare pid.
+ * the group has a member, unlike a bare pid. Groups in `sent` are skipped, then added.
  */
-function signalSession(sid: number, signal: NodeJS.Signals): void {
-  for (const pgid of sessionGroups(sid)) {
+function signalSession(sid: number, signal: NodeJS.Signals, sent?: Set<number>): void {
+  const pgids = sessionGroups(sid);
+  for (const pgid of pgids ?? []) {
+    if (sent?.has(pgid)) continue;
+    sent?.add(pgid);
     try {
       process.kill(-pgid, signal);
     } catch {
@@ -205,12 +305,12 @@ function signalSession(sid: number, signal: NodeJS.Signals): void {
 
 export function killAllGroups(signal: NodeJS.Signals): void {
   for (const pgid of groups) signalGroup(pgid, signal);
-  for (const sid of sessions) signalSession(sid, signal);
+  for (const sid of sessions.keys()) signalSession(sid, signal);
 }
 
 export function activeGroupCount(): number {
   for (const pgid of groups) groupAlive(pgid);
-  for (const sid of sessions) sessionGroups(sid);
+  for (const sid of sessions.keys()) sessionGroups(sid);
   return groups.size + sessions.size;
 }
 
@@ -339,6 +439,8 @@ export function shellQuote(value: string): string {
 export type Background = {
   child: ChildProcess;
   output: () => string;
+  /** performance.now() just before the spawn, after Speedpatrol's own setup. */
+  started: number;
   /** True while the leader or any process of its group is alive. */
   running(): boolean;
   stop(): Promise<void>;
@@ -356,6 +458,9 @@ export function startBackground(
   env: Record<string, string>,
   options: { input?: boolean; session?: boolean } = {},
 ): Background {
+  // The spawn forks, so a count read after it that exceeds this one proves the counter advances.
+  const forksBefore = options.session ? forkCount() : undefined;
+  const started = performance.now();
   const child = spawn('bash', ['-c', command], {
     cwd,
     env: commandEnv(env),
@@ -373,7 +478,7 @@ export function startBackground(
       text += chunk.toString();
       if (!text.includes('\n')) return;
       sid = Number(text.split('\n')[0]);
-      sessions.add(sid);
+      sessions.set(sid, { groups: new Set([sid]), forksBefore });
       report.destroy();
       settle();
     });
@@ -387,24 +492,38 @@ export function startBackground(
   child.stdout?.on('data', append);
   child.stderr?.on('data', append);
   child.on('error', (error) => append(Buffer.from(`${error.message}\n`)));
-  // The group can outlive its leader (a server backgrounded by the shell), so check both.
+  // The group can outlive its leader (a server backgrounded by the shell), so check both. A session
+  // still tracked after its reading may hold a live process the reading could not confirm.
   const pgid = child.pid;
   const running = () =>
     (child.exitCode === null && child.signalCode === null) ||
     (pgid !== undefined && groupAlive(pgid)) ||
-    (sid !== undefined && sessionGroups(sid).length > 0);
+    (sid !== undefined && (sessionGroups(sid)?.length ?? 1) > 0);
+  // A stop's session signal also reaches each group a later reading shows: one that no reading
+  // showed when it was sent (it failed, or a fork raced it) gets it once one does.
+  let current: NodeJS.Signals | undefined;
+  const sent = new Set<number>();
+  const signalPending = () => {
+    if (current && sid !== undefined) signalSession(sid, current, sent);
+  };
   const signal = (name: NodeJS.Signals) => {
-    if (sid !== undefined) signalSession(sid, name);
+    current = name;
+    sent.clear();
+    signalPending();
     killTree(child, name);
   };
   return {
     child,
     output: () => output,
+    started,
     running,
     async stop() {
       const settle = async (ms: number) => {
         const deadline = Date.now() + ms;
-        while (running() && Date.now() < deadline) await new Promise((done) => setTimeout(done, 25));
+        while (running() && Date.now() < deadline) {
+          signalPending();
+          await new Promise((done) => setTimeout(done, 25));
+        }
       };
       // The session id is the first thing the command writes. A command stalled
       // before writing it gets the same bound as the stop, then its group is stopped.
@@ -417,6 +536,17 @@ export function startBackground(
       if (!running()) return;
       signal('SIGKILL');
       await settle(5000);
+      if (sid === undefined) return;
+      // A last reading confirms the session is empty. One that finds a live group (after readings
+      // that could not show it) gets the SIGKILL they could not send, and the stop still fails.
+      const left = sessionGroups(sid);
+      if (left?.length === 0) return;
+      if (left) signalSession(sid, 'SIGKILL');
+      throw new Error(
+        left
+          ? 'The terminal app was still running after SIGKILL'
+          : 'Could not confirm from the process table that the terminal app stopped',
+      );
     },
   };
 }

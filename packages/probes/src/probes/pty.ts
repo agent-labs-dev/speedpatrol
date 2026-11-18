@@ -68,8 +68,8 @@ export const ptyProbe: ProbeFactory<'pty'> = (benchmark, context) => {
           throw new Error(`before command ${prepared.timedOut ? 'timed out' : `exited with code ${prepared.code}`}`);
         }
       }
-      const started = performance.now();
       const app = startBackground(command, cwd, env, { input: true, session: true });
+      const { started } = app;
       // A write after the app exited must fail the sample through 'exit', not crash Speedpatrol.
       app.child.stdin?.on('error', () => undefined);
       const decoder = new StringDecoder('utf8');
