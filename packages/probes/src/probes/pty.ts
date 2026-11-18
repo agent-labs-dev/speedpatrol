@@ -30,7 +30,8 @@ export class MarkerScan {
  */
 export function ptyCommand(command: string, cols: number, rows: number, platform = process.platform): string {
   const inner = `{ echo $$ >&3; exec 3>&-; } 2>/dev/null; stty cols ${cols} rows ${rows} -echo 2>/dev/null; exec bash -c ${shellQuote(command)}`;
-  if (platform === 'linux') return `exec script -qfec ${shellQuote(inner)} /dev/null`;
+  // util-linux script runs its command with $SHELL, which can be fish or csh: only bash reads the wrapper.
+  if (platform === 'linux') return `exec script -qfec ${shellQuote(`exec bash -c ${shellQuote(inner)}`)} /dev/null`;
   if (platform === 'darwin') return `exec script -qF /dev/null bash -c ${shellQuote(inner)}`;
   throw new Error(`The pty probe runs on Linux and macOS, not ${platform}`);
 }

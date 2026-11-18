@@ -23,8 +23,9 @@ describe('MarkerScan', () => {
 
 describe('ptyCommand', () => {
   it('wraps the command in script for Linux and macOS and refuses elsewhere', () => {
+    // Only bash reads the wrapper, whatever $SHELL script starts it with.
     expect(ptyCommand('app', 80, 24, 'linux')).toBe(
-      `exec script -qfec '{ echo $$ >&3; exec 3>&-; } 2>/dev/null; stty cols 80 rows 24 -echo 2>/dev/null; exec bash -c '\\''app'\\''' /dev/null`,
+      `exec script -qfec 'exec bash -c '\\''{ echo $$ >&3; exec 3>&-; } 2>/dev/null; stty cols 80 rows 24 -echo 2>/dev/null; exec bash -c '\\''\\'\\'''\\''app'\\''\\'\\'''\\'''\\''' /dev/null`,
     );
     expect(ptyCommand('app', 80, 24, 'darwin')).toMatch(/^exec script -qF \/dev\/null bash -c /);
     expect(() => ptyCommand('app', 80, 24, 'win32')).toThrow('Linux and macOS');
