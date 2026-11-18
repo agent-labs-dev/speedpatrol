@@ -187,14 +187,14 @@ function readProcesses(): Process[] | undefined {
  * process of it can fork and exit while the processes are read, and the
  * reading misses its child. The child starts in its parent's group, though,
  * and a group signal check is atomic. So an empty reading drops the id only
- * once each group the session has had is accounted for: it is gone (ESRCH),
- * or the reading shows its members (zombies, or another session's processes
- * once the id is reused). A group that exists but that the reading did not
- * show keeps the session tracked, unknown, until a later reading settles it.
- * POSIX has no session-wide check, so a child that moves to a new group, or
- * whose parent stays a zombie, during the reading is still missed. A signal
- * check proves a group exists, not that it is still the session's, so only
- * groups a reading shows are returned to be signalled.
+ * once each group the session has had is gone (ESRCH). A row the reading
+ * shows proves nothing about the rest of its group: a zombie can have forked
+ * an unlisted child before it exited. A group that still exists keeps the
+ * session tracked, unknown, until a later reading shows a live member or the
+ * group goes. POSIX has no session-wide check, so a child that moves to a new
+ * group during the reading is still missed. A signal check proves a group
+ * exists, not that it is still the session's, so only groups a reading shows
+ * are returned to be signalled.
  */
 function sessionGroups(sid: number): number[] | undefined {
   const seen = sessions.get(sid);
@@ -206,7 +206,7 @@ function sessionGroups(sid: number): number[] | undefined {
   for (const pgid of pgids) seen.add(pgid);
   if (pgids.length > 0) return pgids;
   // Checked after the reading, so a child forked during it is still in a group checked here.
-  for (const pgid of seen) if (groupGone(pgid) || table.some((p) => p.pgrp === pgid)) seen.delete(pgid);
+  for (const pgid of seen) if (groupGone(pgid)) seen.delete(pgid);
   if (seen.size > 0) return undefined;
   sessions.delete(sid);
   return [];
