@@ -192,13 +192,14 @@ function readSession(sid: number): number[] | undefined {
  * answers a signal, an empty reading is read again before it counts. Without
  * a reading nothing is known: no group is signalled, since a signal check
  * proves a group exists, not that it is still the session's, and the session
- * stays tracked, so a stop and the shutdown read again within their deadlines.
+ * stays tracked, so a stop and the shutdown read again within their deadlines,
+ * and the result is undefined.
  */
-function sessionGroups(sid: number): number[] {
+function sessionGroups(sid: number): number[] | undefined {
   const seen = sessions.get(sid) ?? new Set([sid]);
   let pgids = readSession(sid);
   if (pgids?.length === 0 && [...seen].some(signalReaches)) pgids = readSession(sid);
-  if (pgids === undefined) return [];
+  if (pgids === undefined) return undefined;
   if (pgids.length === 0) sessions.delete(sid);
   else for (const pgid of pgids) seen.add(pgid);
   return pgids;
@@ -207,16 +208,18 @@ function sessionGroups(sid: number): number[] {
 /**
  * A session has no kill(2) of its own, so each of its groups is signalled: a
  * group signal reaches every member at once, and a group id stays taken while
- * the group has a member, unlike a bare pid.
+ * the group has a member, unlike a bare pid. False when no reading backed it.
  */
-function signalSession(sid: number, signal: NodeJS.Signals): void {
-  for (const pgid of sessionGroups(sid)) {
+function signalSession(sid: number, signal: NodeJS.Signals): boolean {
+  const pgids = sessionGroups(sid);
+  for (const pgid of pgids ?? []) {
     try {
       process.kill(-pgid, signal);
     } catch {
       /* The group emptied since the listing. */
     }
   }
+  return pgids !== undefined;
 }
 
 export function killAllGroups(signal: NodeJS.Signals): void {
@@ -409,9 +412,15 @@ export function startBackground(
   const running = () =>
     (child.exitCode === null && child.signalCode === null) ||
     (pgid !== undefined && groupAlive(pgid)) ||
-    (sid !== undefined && (sessionGroups(sid).length > 0 || sessions.has(sid)));
+    (sid !== undefined && (sessionGroups(sid)?.length ?? 1) > 0);
+  // A session signal that no reading backed is sent again once a reading succeeds.
+  let pending: NodeJS.Signals | undefined;
+  const signalPending = () => {
+    if (pending && sid !== undefined && signalSession(sid, pending)) pending = undefined;
+  };
   const signal = (name: NodeJS.Signals) => {
-    if (sid !== undefined) signalSession(sid, name);
+    pending = name;
+    signalPending();
     killTree(child, name);
   };
   return {
@@ -421,7 +430,10 @@ export function startBackground(
     async stop() {
       const settle = async (ms: number) => {
         const deadline = Date.now() + ms;
-        while (running() && Date.now() < deadline) await new Promise((done) => setTimeout(done, 25));
+        while (running() && Date.now() < deadline) {
+          signalPending();
+          await new Promise((done) => setTimeout(done, 25));
+        }
       };
       // The session id is the first thing the command writes. A command stalled
       // before writing it gets the same bound as the stop, then its group is stopped.
