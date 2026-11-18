@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { it } from 'vitest';
 import { activeGroupCount, shellQuote, startBackground, waitUntil } from './exec.js';
 
-it.skipIf(process.platform === 'win32')('drops a session once its group id belongs to another session', async () => {
+it.skipIf(process.platform !== 'linux')('drops a session once its group id belongs to another session', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'session-group-reuse-'));
   const pidFile = join(dir, 'group.pid');
   // The reported id names a live group of the shell's own session, not a session:

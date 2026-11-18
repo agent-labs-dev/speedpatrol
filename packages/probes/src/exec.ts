@@ -175,11 +175,6 @@ function signalGroup(pgid: number, signal: NodeJS.Signals): boolean {
   }
 }
 
-/** Every process: /proc where it exists (Linux), else on macOS ps and getsid(2); undefined when neither can be read. */
-function readProcesses(): Process[] | undefined {
-  return linuxProcesses() ?? (process.platform === 'darwin' ? macProcesses() : undefined);
-}
-
 /**
  * The process groups of a session that still have a live member, from a
  * reading of every process; undefined while that is unknown, and empty for a
@@ -188,7 +183,7 @@ function readProcesses(): Process[] | undefined {
  * reading misses its child. The child starts in its parent's group, though,
  * and a group signal check is atomic. So an empty reading drops the id only
  * once each group the session has had is gone: a signal check finds it gone
- * (ESRCH), or the reading shows its id in another session, which a group
+ * (ESRCH), or a /proc reading shows its id in another session, which a group
  * only gets once it has emptied, as a group lies within one session. A row of
  * the session itself proves nothing about the rest of its group: a zombie can
  * have forked an unlisted child before it exited. A group that still exists keeps the
@@ -202,14 +197,19 @@ function sessionGroups(sid: number): number[] | undefined {
   const seen = sessions.get(sid);
   // Dropped once proven empty: the id may since belong to another session.
   if (seen === undefined) return [];
-  const table = readProcesses();
+  // Every process: /proc where it exists (Linux), else on macOS ps and getsid(2).
+  const proc = linuxProcesses();
+  const table = proc ?? (process.platform === 'darwin' ? macProcesses() : undefined);
   if (table === undefined) return undefined;
   const pgids = [...new Set(table.filter((p) => p.session === sid && live(p.state)).map((p) => p.pgrp))];
   for (const pgid of pgids) seen.add(pgid);
   if (pgids.length > 0) return pgids;
   // Checked after the reading, so a child forked during it is still in a group checked here.
   for (const pgid of seen) {
-    if (groupGone(pgid) || table.some((p) => p.pgrp === pgid && p.session !== sid)) seen.delete(pgid);
+    // Only /proc gives a group and a session from one record: macOS reads them apart, so a pid
+    // reused between the two pairs one process's group with another's session.
+    const elsewhere = proc !== undefined && table.some((p) => p.pgrp === pgid && p.session !== sid);
+    if (groupGone(pgid) || elsewhere) seen.delete(pgid);
   }
   if (seen.size > 0) return undefined;
   sessions.delete(sid);
