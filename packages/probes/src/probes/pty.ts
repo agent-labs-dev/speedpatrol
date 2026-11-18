@@ -24,10 +24,12 @@ export class MarkerScan {
  * Wraps a command so it runs on a pseudo-terminal of the given size, with
  * echo off: typed input never reaches the output unless the app writes it, so
  * only the app can write the marker. `script` (util-linux on Linux, BSD on
- * macOS) owns the terminal, so Speedpatrol needs no native module.
+ * macOS) owns the terminal, so Speedpatrol needs no native module. `script`
+ * runs the app in a new session, outside Speedpatrol's process group, so the
+ * wrapper writes that session's id to fd 3 for the probe to stop it.
  */
 export function ptyCommand(command: string, cols: number, rows: number, platform = process.platform): string {
-  const inner = `stty cols ${cols} rows ${rows} -echo 2>/dev/null; exec bash -c ${shellQuote(command)}`;
+  const inner = `{ echo $$ >&3; exec 3>&-; } 2>/dev/null; stty cols ${cols} rows ${rows} -echo 2>/dev/null; exec bash -c ${shellQuote(command)}`;
   if (platform === 'linux') return `exec script -qfec ${shellQuote(inner)} /dev/null`;
   if (platform === 'darwin') return `exec script -qF /dev/null bash -c ${shellQuote(inner)}`;
   throw new Error(`The pty probe runs on Linux and macOS, not ${platform}`);
@@ -64,7 +66,7 @@ export const ptyProbe: ProbeFactory<'pty'> = (benchmark, context) => {
         }
       }
       const started = performance.now();
-      const app = startBackground(command, cwd, env, { input: true });
+      const app = startBackground(command, cwd, env, { input: true, session: true });
       // A write after the app exited must fail the sample through 'exit', not crash Speedpatrol.
       app.child.stdin?.on('error', () => undefined);
       const decoder = new StringDecoder('utf8');

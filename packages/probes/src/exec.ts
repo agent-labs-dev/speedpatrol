@@ -34,6 +34,9 @@ const GNU_TIME = process.env.SPEEDPATROL_GNU_TIME ?? '/usr/bin/time';
 // Process group ids, tracked apart from their leaders: a dev server's
 // grandchild can outlive the bash leader and keep its port bound.
 const groups = new Set<number>();
+// Session ids, tracked like groups: `script` starts a terminal app in a
+// session of its own, and the app's processes can leave its group (a job).
+const sessions = new Set<number>();
 
 /** True while a non-zombie process of the group exists; drops the id once none does. */
 function groupAlive(pgid: number): boolean {
@@ -52,28 +55,34 @@ function groupAlive(pgid: number): boolean {
   return false;
 }
 
+const live = (state: string | undefined) => state !== undefined && state[0] !== 'Z' && state[0] !== 'X';
+
+/** Every process on Linux, from /proc; undefined without /proc. */
+function linuxProcesses(): { pid: number; state: string; pgrp: number; session: number }[] | undefined {
+  let pids: string[];
+  try {
+    pids = readdirSync('/proc').filter((name) => /^\d+$/.test(name));
+  } catch {
+    return undefined;
+  }
+  return pids.flatMap((pid) => {
+    let stat: string;
+    try {
+      stat = readFileSync(`/proc/${pid}/stat`, 'utf8');
+    } catch {
+      return []; // Exited since the listing.
+    }
+    // "pid (comm) state ppid pgrp session ...": comm can hold spaces and ")".
+    const [state = '', , pgrp, session] = stat.slice(stat.lastIndexOf(')') + 2).split(' ');
+    return [{ pid: Number(pid), state, pgrp: Number(pgrp), session: Number(session) }];
+  });
+}
+
 /** Whether a member of the group is in any state but zombie (Z) or dead (X). */
 function hasLiveMember(pgid: number): boolean {
-  const live = (state: string | undefined) => state !== undefined && state[0] !== 'Z' && state[0] !== 'X';
   if (process.platform === 'linux') {
-    let pids: string[];
-    try {
-      pids = readdirSync('/proc').filter((name) => /^\d+$/.test(name));
-    } catch {
-      return true; // No /proc to read: the signal check is all there is.
-    }
-    for (const pid of pids) {
-      let stat: string;
-      try {
-        stat = readFileSync(`/proc/${pid}/stat`, 'utf8');
-      } catch {
-        continue; // Exited since the listing.
-      }
-      // "pid (comm) state ppid pgrp ...": comm can hold spaces and ")".
-      const [state, , pgrp] = stat.slice(stat.lastIndexOf(')') + 2).split(' ');
-      if (Number(pgrp) === pgid && live(state)) return true;
-    }
-    return false;
+    // No /proc to read: the signal check is all there is.
+    return linuxProcesses()?.some((proc) => proc.pgrp === pgid && live(proc.state)) ?? true;
   }
   try {
     const rows = execFileSync('ps', ['-A', '-o', 'pgid=', '-o', 'stat='], { encoding: 'utf8' });
@@ -104,13 +113,46 @@ function signalGroup(pgid: number, signal: NodeJS.Signals): boolean {
   }
 }
 
+/** The live processes of a session, by its exact id; drops the id once none is left. */
+function sessionMembers(sid: number): number[] {
+  let pids: number[];
+  if (process.platform === 'linux') {
+    pids = (linuxProcesses() ?? []).filter((proc) => proc.session === sid && live(proc.state)).map((proc) => proc.pid);
+  } else {
+    try {
+      // -s matches the session id exactly, not a command line.
+      pids = execFileSync('pgrep', ['-s', String(sid)], { encoding: 'utf8' })
+        .split('\n')
+        .filter(Boolean)
+        .map(Number);
+    } catch {
+      pids = []; // pgrep exits 1 when no process matches.
+    }
+  }
+  if (pids.length === 0) sessions.delete(sid);
+  return pids;
+}
+
+/** A session has no kill(2) of its own, so each of its processes is signalled. */
+function signalSession(sid: number, signal: NodeJS.Signals): void {
+  for (const pid of sessionMembers(sid)) {
+    try {
+      process.kill(pid, signal);
+    } catch {
+      /* Exited since the listing. */
+    }
+  }
+}
+
 export function killAllGroups(signal: NodeJS.Signals): void {
   for (const pgid of groups) signalGroup(pgid, signal);
+  for (const sid of sessions) signalSession(sid, signal);
 }
 
 export function activeGroupCount(): number {
   for (const pgid of groups) groupAlive(pgid);
-  return groups.size;
+  for (const sid of sessions) sessionMembers(sid);
+  return groups.size + sessions.size;
 }
 
 function parseTimes(text: string): { user: number; sys: number } | undefined {
@@ -243,20 +285,41 @@ export type Background = {
   stop(): Promise<void>;
 };
 
-/** Starts a long-running command in its own process group. `input` gives it a writable stdin. */
+/**
+ * Starts a long-running command in its own process group. `input` gives it a
+ * writable stdin. `session` is for a command that starts a session of its
+ * own (as `script` does): it writes that session's id and a newline to fd 3,
+ * and `stop` ends every process of the session too.
+ */
 export function startBackground(
   command: string,
   cwd: string,
   env: Record<string, string>,
-  options: { input?: boolean } = {},
+  options: { input?: boolean; session?: boolean } = {},
 ): Background {
   const child = spawn('bash', ['-c', command], {
     cwd,
     env: commandEnv(env),
     detached: true,
-    stdio: [options.input ? 'pipe' : 'ignore', 'pipe', 'pipe'],
+    stdio: [options.input ? 'pipe' : 'ignore', 'pipe', 'pipe', options.session ? 'pipe' : 'ignore'],
   });
   registerGroup(child);
+  let sid: number | undefined;
+  // Settles once the id arrives, or once the pipe closes because the command ended without one.
+  const reported = new Promise<void>((settle) => {
+    const report = child.stdio[3] as Readable | null;
+    if (!report) return settle();
+    let text = '';
+    report.on('data', (chunk: Buffer) => {
+      text += chunk.toString();
+      if (!text.includes('\n')) return;
+      sid = Number(text.split('\n')[0]);
+      sessions.add(sid);
+      report.destroy();
+      settle();
+    });
+    report.on('close', () => settle());
+  });
   let output = '';
   const append = (chunk: Buffer) => {
     output += chunk.toString();
@@ -268,7 +331,13 @@ export function startBackground(
   // The group can outlive its leader (a server backgrounded by the shell), so check both.
   const pgid = child.pid;
   const running = () =>
-    (child.exitCode === null && child.signalCode === null) || (pgid !== undefined && groupAlive(pgid));
+    (child.exitCode === null && child.signalCode === null) ||
+    (pgid !== undefined && groupAlive(pgid)) ||
+    (sid !== undefined && sessionMembers(sid).length > 0);
+  const signal = (name: NodeJS.Signals) => {
+    if (sid !== undefined) signalSession(sid, name);
+    killTree(child, name);
+  };
   return {
     child,
     output: () => output,
@@ -278,11 +347,13 @@ export function startBackground(
         const deadline = Date.now() + ms;
         while (running() && Date.now() < deadline) await new Promise((done) => setTimeout(done, 25));
       };
+      // The session id is the first thing the command writes, so it is here before a stop can need it.
+      await reported;
       if (!running()) return;
-      killTree(child, 'SIGTERM');
+      signal('SIGTERM');
       await settle(5000);
       if (!running()) return;
-      killTree(child, 'SIGKILL');
+      signal('SIGKILL');
       await settle(5000);
     },
   };
