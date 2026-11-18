@@ -80,36 +80,48 @@ function linuxProcesses(): Process[] | undefined {
   });
 }
 
-/** Rows of "pid pgid sid state", as `PS_SESSIONS` prints them; a row of any other shape is skipped. */
-export function parseProcessRows(text: string): Process[] {
-  return text.split('\n').flatMap((row) => {
-    const [pid, pgrp, session, state, extra] = row.trim().split(/\s+/);
-    const ids = [pid, pgrp, session].map(Number);
-    if (extra !== undefined || state === undefined || !ids.every((id) => Number.isInteger(id) && id > 0)) return [];
-    return [{ pid: ids[0]!, pgrp: ids[1]!, session: ids[2]!, state }];
+/**
+ * Joins ps rows of "pid pgid state" with rows of "pid sid"; a process
+ * without a session (it exited between the two listings) or a row of any
+ * other shape is skipped.
+ */
+export function joinProcessRows(ps: string, sids: string): Process[] {
+  const rows = (text: string, width: number) =>
+    text.split('\n').flatMap((row) => {
+      const fields = row.trim().split(/\s+/);
+      return fields.length === width ? [fields] : [];
+    });
+  const id = (text: string) => (/^\d+$/.test(text) && Number(text) > 0 ? Number(text) : undefined);
+  const session = new Map(rows(sids, 2).map(([pid, sid]) => [id(pid!), id(sid!)]));
+  return rows(ps, 3).flatMap(([pid, pgrp, state]) => {
+    const ids = { pid: id(pid!), pgrp: id(pgrp!), session: session.get(id(pid!)) };
+    if (ids.pid === undefined || ids.pgrp === undefined || ids.session === undefined) return [];
+    return [{ pid: ids.pid, pgrp: ids.pgrp, session: ids.session, state: state! }];
   });
 }
 
-// ps lists every process with its group and state. No ps column gives the
-// session where there is no /proc: macOS documents `sess` as the session ID,
-// but its ps prints the kernel's eproc e_sess pointer, which xnu leaves zero,
-// and its pgrep has no -s. getsid(2) answers for any pid, so perl, which macOS
-// ships, asks it per process through syscall(2). The script's argument is the
-// getsid syscall number: 310 on macOS (xnu bsd/kern/syscalls.master).
-const PS_SESSIONS = `
-open(my $ps, '-|', 'ps', '-A', '-o', 'pid=', '-o', 'pgid=', '-o', 'stat=') or exit 1;
-while (<$ps>) {
-  my ($pid, $pgid, $state) = split;
-  my $sid = syscall($ARGV[0] + 0, $pid + 0);
-  print "$pid $pgid $sid $state\\n" if $sid > 0;
-}
-close($ps) or exit 1;
-`;
+// No macOS ps column or pgrep option gives the session: ps documents `sess`
+// as the session ID but prints the kernel's eproc e_sess pointer, which xnu
+// leaves zero, and pgrep has no -s. getsid(2) answers for any pid, and
+// JavaScript for Automation, which every macOS ships, can bind it. (macOS
+// perl is built without syscall.)
+const GETSID_JXA = `ObjC.bindFunction('getsid', ['int', ['int']]);
+function run(pids) {
+  return pids.map((pid) => pid + ' ' + $.getsid(Number(pid))).join('\\n');
+}`;
 
-/** Every process, with its session, from ps and getsid(2); undefined when they cannot be read. */
-export function psProcesses(getsid = 310): Process[] | undefined {
+/** Every process on macOS, with its session; undefined when the table cannot be read. */
+function macProcesses(): Process[] | undefined {
   try {
-    return parseProcessRows(execFileSync('perl', ['-e', PS_SESSIONS, String(getsid)], { encoding: 'utf8' }));
+    const ps = execFileSync('ps', ['-A', '-o', 'pid=', '-o', 'pgid=', '-o', 'stat='], { encoding: 'utf8' });
+    const pids = ps.split('\n').flatMap((row) =>
+      row
+        .trim()
+        .split(/\s+/, 1)
+        .filter((pid) => /^\d+$/.test(pid)),
+    );
+    const sids = execFileSync('osascript', ['-l', 'JavaScript', '-e', GETSID_JXA, ...pids], { encoding: 'utf8' });
+    return joinProcessRows(ps, sids);
   } catch {
     return undefined;
   }
@@ -162,11 +174,11 @@ function signalGroup(pgid: number, signal: NodeJS.Signals): boolean {
 /**
  * The process groups of a session that still have a live member; drops the
  * id once none has. The session's processes come from /proc where it exists
- * (Linux), else from ps and getsid(2) (macOS). With neither readable, the
+ * (Linux), else on macOS from ps and getsid(2). With neither readable, the
  * signal check on the leader's own group is all there is.
  */
 function sessionGroups(sid: number): number[] {
-  const table = linuxProcesses() ?? psProcesses();
+  const table = linuxProcesses() ?? (process.platform === 'darwin' ? macProcesses() : undefined);
   const pgids = table
     ? [...new Set(table.filter((p) => p.session === sid && live(p.state)).map((p) => p.pgrp))]
     : signalReaches(sid)

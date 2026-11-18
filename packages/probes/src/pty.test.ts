@@ -27,7 +27,9 @@ describe('ptyCommand', () => {
     expect(ptyCommand('app', 80, 24, 'linux')).toBe(
       `exec script -qfec 'exec bash -c '\\''{ echo $$ >&3; exec 3>&-; } 2>/dev/null; stty cols 80 rows 24 -echo 2>/dev/null; exec bash -c '\\''\\'\\'''\\''app'\\''\\'\\'''\\'''\\''' /dev/null`,
     );
-    expect(ptyCommand('app', 80, 24, 'darwin')).toMatch(/^exec script -qF \/dev\/null bash -c /);
+    expect(ptyCommand('app', 80, 24, 'darwin')).toMatch(
+      /^exec script -qF \/dev\/null bash -c .* < <\(exec cat 3>&-\)$/,
+    );
     expect(() => ptyCommand('app', 80, 24, 'win32')).toThrow('Linux and macOS');
   });
 });

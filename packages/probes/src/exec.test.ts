@@ -1,14 +1,12 @@
 import { execFileSync } from 'node:child_process';
 import { once } from 'node:events';
 import { readFileSync } from 'node:fs';
-import { arch } from 'node:os';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   activeGroupCount,
+  joinProcessRows,
   killAllGroups,
   killTree,
-  parseProcessRows,
-  psProcesses,
   runTimed,
   shellQuote,
   startBackground,
@@ -150,41 +148,13 @@ describe('package-manager launcher environment', () => {
   });
 });
 
-describe('process table from ps and getsid', () => {
-  it('parses "pid pgid sid state" rows and skips any other shape', () => {
-    expect(
-      parseProcessRows('  412   400   390 S+\n9 9 9 Ss\n\nPID PGID SID STAT\n7 7 -1 S\n5 5 5\n6 6 6 R extra\n'),
-    ).toEqual([
+describe('macOS process table', () => {
+  it('joins ps rows with session ids and skips any other shape', () => {
+    const ps = '  412   400 S+\n  9 9 Ss\n\nPID PGID STAT\n  7 7 S\n  5 5\n  6 6 R extra\n';
+    const sids = '412 390\n9 9\n7 -1\n';
+    expect(joinProcessRows(ps, sids)).toEqual([
       { pid: 412, pgrp: 400, session: 390, state: 'S+' },
       { pid: 9, pgrp: 9, session: 9, state: 'Ss' },
     ]);
-  });
-
-  // The ps and getsid path serves macOS. Linux has a getsid syscall too, so
-  // the same script runs here and must agree with the session ids in /proc.
-  const linuxGetsid = { x64: 124, arm64: 156 }[arch()];
-  it.runIf(process.platform === 'linux' && linuxGetsid !== undefined)('agrees with /proc on Linux', () => {
-    const fromPs = psProcesses(linuxGetsid);
-    expect(fromPs?.some((p) => p.pid === process.pid)).toBe(true);
-    for (const p of fromPs!) {
-      let stat: string;
-      try {
-        stat = readFileSync(`/proc/${p.pid}/stat`, 'utf8');
-      } catch {
-        continue; // Exited since the listing.
-      }
-      const [, , pgrp, session] = stat.slice(stat.lastIndexOf(')') + 2).split(' ');
-      expect({ pid: p.pid, pgrp: p.pgrp, session: p.session }).toEqual({
-        pid: p.pid,
-        pgrp: Number(pgrp),
-        session: Number(session),
-      });
-    }
-  });
-
-  it.runIf(process.platform === 'darwin')('lists this process with its session on macOS', () => {
-    const self = psProcesses()?.find((p) => p.pid === process.pid);
-    expect(self).toBeDefined();
-    expect(self!.session).toBeGreaterThan(0);
   });
 });

@@ -5,9 +5,6 @@
       "entry": ["src/testing/fake-agent.mjs"],
       "ignoreBinaries": ["ssh-keygen"]
     },
-    "packages/probes": {
-      "ignoreBinaries": ["perl"]
-    },
     "packages/dashboard": {
       "entry": ["src/ui/app.js", "scripts/*.mjs"]
     },
