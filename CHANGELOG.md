@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-11-16
+
+### Changed
+
+- A background setup command must keep running for the whole run. A background command that exits after it became ready, on purpose or not, now fails the run with exit code 4, and a `readyUrl` that another process already serves fails the run before the command starts. Run a command that is meant to finish as a foreground setup step instead (#63).
+
 ### Fixed
 
 - A run fails, with exit code 4, when a background setup command's `readyUrl` already answers before the command starts, or when a background setup process exits during the run (also where the exited processes stay as unreaped zombies, as under a container init that does not reap orphans), instead of measuring whatever else serves that port. A `startup` benchmark whose ready URL already answers fails its sample instead of timing the other process (#62).
