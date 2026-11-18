@@ -446,10 +446,17 @@ export function startBackground(
       if (!running()) return;
       signal('SIGKILL');
       await settle(5000);
-      // Without a reading of the session the stop cannot tell whether its processes are gone.
-      if (sid !== undefined && sessionGroups(sid) === undefined) {
-        throw new Error('Could not read the process table to confirm the terminal app stopped');
-      }
+      if (sid === undefined) return;
+      // A last reading confirms the session is empty. One that finds a live group (after readings
+      // that failed) gets the SIGKILL they could not send, and the stop still fails: nothing confirmed it.
+      const left = sessionGroups(sid);
+      if (left?.length === 0) return;
+      if (left) signalSession(sid, 'SIGKILL');
+      throw new Error(
+        left
+          ? 'The terminal app was still running after SIGKILL'
+          : 'Could not read the process table to confirm the terminal app stopped',
+      );
     },
   };
 }
