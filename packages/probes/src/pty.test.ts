@@ -40,6 +40,7 @@ describe('schema', () => {
     expect(parse({ marker: 'DONE', ready: 'DONE' })).toBe(false);
     // A typed \r echoes as \r\n.
     expect(parse({ marker: 'hello\r\n', input: 'hello\r' })).toBe(false);
+    expect(parse({ marker: 'hello\r\n', input: 'hello\n' })).toBe(false);
   });
 
   it('fails the sample when an interpolated input brings the marker into the echo', async () => {
@@ -90,6 +91,12 @@ describe.runIf(process.platform === 'linux' || process.platform === 'darwin')('p
     const result = await probe({ run: 'sleep 0.2; printf "SP_DONE"; sleep 30', marker: 'SP_DONE' }).sample();
     expect(result.ready_ms).toBeUndefined();
     expect(result.marker_ms).toBeGreaterThanOrEqual(200);
+  });
+
+  it('fails a sample whose before command fails', async () => {
+    await expect(
+      probe({ run: 'printf SP_DONE; sleep 30', before: 'exit 5', marker: 'SP_DONE' }).sample(),
+    ).rejects.toThrow('before command exited with code 5');
   });
 
   it('fails a sample whose app exits or never writes the marker', async () => {

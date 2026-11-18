@@ -182,13 +182,13 @@ const electronSchema = z.object({
  */
 /**
  * Whether the terminal's echo of typed input can contain the marker. A
- * terminal in its default mode echoes each typed character and a typed `\r`
- * as `\r\n`, so both forms are checked; such a marker would match the echo
- * instead of the app's output.
+ * terminal in its default mode echoes each typed character, and a typed `\r`
+ * or `\n` as `\r\n`, so both forms are checked; such a marker would match
+ * the echo instead of the app's output.
  */
 export function inputEchoesMarker(input: string | undefined, marker: string): boolean {
   if (!input) return false;
-  return input.includes(marker) || input.replaceAll('\r', '\r\n').includes(marker);
+  return input.includes(marker) || input.replace(/[\r\n]/g, '\r\n').includes(marker);
 }
 
 const ptySchema = z

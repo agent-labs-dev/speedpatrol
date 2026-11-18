@@ -55,7 +55,12 @@ export const ptyProbe: ProbeFactory<'pty'> = (benchmark, context) => {
     metrics,
     async sample() {
       if (echoed) throw new Error('The terminal echo of input contains the marker, so the echo would stop the clock');
-      if (before) await runTimed({ command: before, cwd, env, timeoutMs: context.timeoutMs });
+      if (before) {
+        const prepared = await runTimed({ command: before, cwd, env, timeoutMs: context.timeoutMs });
+        if (prepared.timedOut || prepared.code !== 0) {
+          throw new Error(`before command ${prepared.timedOut ? 'timed out' : `exited with code ${prepared.code}`}`);
+        }
+      }
       const started = performance.now();
       const app = startBackground(command, cwd, env, { input: true });
       // A write after the app exited must fail the sample through 'exit', not crash Speedpatrol.
