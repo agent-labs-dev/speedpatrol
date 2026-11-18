@@ -36,8 +36,9 @@ const GNU_TIME = process.env.SPEEDPATROL_GNU_TIME ?? '/usr/bin/time';
 const groups = new Set<number>();
 // Session ids, tracked like groups: `script` starts a terminal app in a
 // session of its own, and the app's processes can leave its group (a job).
-// Each maps to the groups the session has had.
-const sessions = new Map<number, Set<number>>();
+// Each maps to the groups the session has had, and the fork count read before
+// the spawn that started it (see linuxProcesses).
+const sessions = new Map<number, { groups: Set<number>; forksBefore: bigint | undefined }>();
 
 /** True while a non-zombie process of the group exists; drops the id once none does. */
 function groupAlive(pgid: number): boolean {
@@ -61,9 +62,10 @@ const live = (state: string | undefined) => state !== undefined && state[0] !== 
 type Process = { pid: number; state: string; pgrp: number; session: number };
 
 /** Tasks the kernel has created since boot, from /proc/stat; undefined where it cannot be read. */
-function forkCount(): string | undefined {
+function forkCount(): bigint | undefined {
   try {
-    return readFileSync('/proc/stat', 'utf8').match(/^processes (\d+)$/m)?.[1];
+    const count = readFileSync('/proc/stat', 'utf8').match(/^processes (\d+)$/m)?.[1];
+    return count === undefined ? undefined : BigInt(count);
   } catch {
     return undefined;
   }
@@ -110,9 +112,11 @@ function liveThreadState(pid: string): string | undefined {
  * exited reads as a zombie while its other threads run, so its state is a live thread's.
  * `complete`: the reading saw every process: the kernel created no task (process or thread)
  * while it was read, as the fork count is the same before and after, /proc hides none, and each
- * stat file it could not read belonged to a process that had exited.
+ * stat file it could not read belonged to a process that had exited. The count is trusted only
+ * once it is proven to advance: it must exceed `forksBefore`, a count read before a fork. Some
+ * kernels (gVisor) report a constant count, which would make every reading look fork-free.
  */
-function linuxProcesses(): { processes: Process[]; complete: boolean } | undefined {
+function linuxProcesses(forksBefore?: bigint): { processes: Process[]; complete: boolean } | undefined {
   const forks = forkCount();
   let pids: string[];
   try {
@@ -120,7 +124,7 @@ function linuxProcesses(): { processes: Process[]; complete: boolean } | undefin
   } catch {
     return undefined;
   }
-  let complete = forks !== undefined && !procHides();
+  let complete = forks !== undefined && forksBefore !== undefined && forks > forksBefore && !procHides();
   const processes = pids.flatMap((pid) => {
     let row: ReturnType<typeof readStat>;
     try {
@@ -248,18 +252,21 @@ function signalGroup(pgid: number, signal: NodeJS.Signals): boolean {
  * created no task during it, so every process alive when it ends existed
  * throughout it and was read, and one live at the end was live, and in the
  * session (a session can only be left), when read. Zombies cannot fork, so no
- * process can join the session after it. macOS has no fork count to bracket
- * its reading with. Otherwise POSIX has no session-wide check, so a child that
+ * process can join the session after it. The fork count proves this only once
+ * it is seen to advance past its value before the session's spawn, a fork; a
+ * count that never moves (gVisor reports 0) leaves every reading incomplete.
+ * macOS has no fork count to bracket its reading with. Otherwise POSIX has no session-wide check, so a child that
  * moves to a new group during the reading is missed. A signal check proves a group
  * exists, not that it is still the session's, so only groups a reading shows
  * are returned to be signalled.
  */
 function sessionGroups(sid: number): number[] | undefined {
-  const seen = sessions.get(sid);
+  const session = sessions.get(sid);
   // Dropped once proven empty: the id may since belong to another session.
-  if (seen === undefined) return [];
+  if (session === undefined) return [];
+  const seen = session.groups;
   // Every process: /proc where it exists (Linux), else on macOS ps and getsid(2).
-  const proc = linuxProcesses();
+  const proc = linuxProcesses(session.forksBefore);
   const table = proc?.processes ?? (process.platform === 'darwin' ? macProcesses() : undefined);
   if (table === undefined) return undefined;
   const pgids = [...new Set(table.filter((p) => p.session === sid && live(p.state)).map((p) => p.pgrp))];
@@ -449,6 +456,8 @@ export function startBackground(
   env: Record<string, string>,
   options: { input?: boolean; session?: boolean } = {},
 ): Background {
+  // The spawn forks, so a count read after it that exceeds this one proves the counter advances.
+  const forksBefore = forkCount();
   const child = spawn('bash', ['-c', command], {
     cwd,
     env: commandEnv(env),
@@ -466,7 +475,7 @@ export function startBackground(
       text += chunk.toString();
       if (!text.includes('\n')) return;
       sid = Number(text.split('\n')[0]);
-      sessions.set(sid, new Set([sid]));
+      sessions.set(sid, { groups: new Set([sid]), forksBefore });
       report.destroy();
       settle();
     });
