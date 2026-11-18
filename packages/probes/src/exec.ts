@@ -69,11 +69,35 @@ function forkCount(): string | undefined {
   }
 }
 
+/** Whether this /proc hides other users' processes or their stat files (the hidepid mount option). */
+function procHides(): boolean {
+  try {
+    const mount = readFileSync('/proc/self/mountinfo', 'utf8')
+      .split('\n')
+      .find((line) => line.split(' ')[4] === '/proc');
+    const option = mount?.split(' - ')[1]?.match(/hidepid=(\w+)/)?.[1];
+    return mount === undefined || (option !== undefined && option !== '0' && option !== 'off');
+  } catch {
+    return true;
+  }
+}
+
+/** A task's state, pgrp and session from its stat file: "pid (comm) state ppid pgrp session ...". */
+function readStat(path: string): { state: string; pgrp: string | undefined; session: string | undefined } {
+  const stat = readFileSync(path, 'utf8');
+  // comm can hold spaces and ")".
+  const [state = '', , pgrp, session] = stat.slice(stat.lastIndexOf(')') + 2).split(' ');
+  return { state, pgrp, session };
+}
+
 /**
- * Every process on Linux, from /proc; undefined without /proc. `forkFree`: the kernel created no
- * task (process or thread) while it was read, as the fork count is the same before and after.
+ * Every process on Linux, from /proc; undefined without /proc. A process whose main thread has
+ * exited reads as a zombie while its other threads run, so its state is a live thread's.
+ * `complete`: the reading saw every process: the kernel created no task (process or thread)
+ * while it was read, as the fork count is the same before and after, /proc hides none, and each
+ * stat file it could not read belonged to a process that had exited.
  */
-function linuxProcesses(): { processes: Process[]; forkFree: boolean } | undefined {
+function linuxProcesses(): { processes: Process[]; complete: boolean } | undefined {
   const forks = forkCount();
   let pids: string[];
   try {
@@ -81,18 +105,26 @@ function linuxProcesses(): { processes: Process[]; forkFree: boolean } | undefin
   } catch {
     return undefined;
   }
+  let complete = forks !== undefined && !procHides();
   const processes = pids.flatMap((pid) => {
-    let stat: string;
+    let row: ReturnType<typeof readStat>;
     try {
-      stat = readFileSync(`/proc/${pid}/stat`, 'utf8');
-    } catch {
-      return []; // Exited since the listing.
+      row = readStat(`/proc/${pid}/stat`);
+      if (!live(row.state)) {
+        for (const tid of readdirSync(`/proc/${pid}/task`)) {
+          const thread = readStat(`/proc/${pid}/task/${tid}/stat`);
+          if (live(thread.state)) row.state = thread.state;
+        }
+      }
+    } catch (error) {
+      // Exited since the listing; any other failure leaves the process unknown.
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT' && (error as NodeJS.ErrnoException).code !== 'ESRCH')
+        complete = false;
+      return [];
     }
-    // "pid (comm) state ppid pgrp session ...": comm can hold spaces and ")".
-    const [state = '', , pgrp, session] = stat.slice(stat.lastIndexOf(')') + 2).split(' ');
-    return [{ pid: Number(pid), state, pgrp: Number(pgrp), session: Number(session) }];
+    return [{ pid: Number(pid), state: row.state, pgrp: Number(row.pgrp), session: Number(row.session) }];
   });
-  return { processes, forkFree: forks !== undefined && forks === forkCount() };
+  return { processes, complete: complete && forks === forkCount() };
 }
 
 /**
@@ -202,7 +234,7 @@ function signalGroup(pgid: number, signal: NodeJS.Signals): boolean {
  * the session itself proves nothing about the rest of its group: a zombie can
  * have forked an unlisted child before it exited. A group that still exists keeps the
  * session tracked, unknown, until a later reading shows a live member or the
- * group goes, or a reading is fork-free. A fork-free /proc reading proves the
+ * group goes, or a reading is complete. A complete /proc reading proves the
  * session has no live process even while zombies hold its groups: the kernel
  * created no task during it, so every process alive when it ends existed
  * throughout it and was read, and one live at the end was live, and in the
@@ -224,7 +256,7 @@ function sessionGroups(sid: number): number[] | undefined {
   const pgids = [...new Set(table.filter((p) => p.session === sid && live(p.state)).map((p) => p.pgrp))];
   for (const pgid of pgids) seen.add(pgid);
   if (pgids.length > 0) return pgids;
-  if (proc?.forkFree) seen.clear();
+  if (proc?.complete) seen.clear();
   // Checked after the reading, so a child forked during it is still in a group checked here.
   for (const pgid of seen) {
     // Only /proc gives a group and a session from one record: macOS reads them apart, so a pid
