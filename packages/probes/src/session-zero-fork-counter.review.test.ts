@@ -5,7 +5,14 @@ import { join } from 'node:path';
 import { expect, it, vi } from 'vitest';
 import { activeGroupCount, shellQuote, startBackground, waitUntil } from './exec.js';
 
-const race = vi.hoisted(() => ({ afterSnapshot: undefined as (() => void) | undefined, counter: '0' }));
+const race = vi.hoisted(() => ({
+  afterSnapshot: undefined as (() => void) | undefined,
+  counter: 0n,
+  // Once the assertions are made, the count advances again (offset by the stuck value, so it
+  // passes the count read before the spawn), so the stop can prove a zombie-only session empty
+  // even where no init reaps orphans.
+  advancing: false,
+}));
 vi.mock('node:fs', async (importOriginal) => {
   const fs = await importOriginal<typeof import('node:fs')>();
   return {
@@ -15,7 +22,10 @@ vi.mock('node:fs', async (importOriginal) => {
     readFileSync: (...args: Parameters<typeof fs.readFileSync>) => {
       const result = fs.readFileSync(...args);
       return args[0] === '/proc/stat' && typeof result === 'string'
-        ? result.replace(/^processes \d+$/m, `processes ${race.counter}`)
+        ? result.replace(
+            /^processes (\d+)$/m,
+            (_, real: string) => `processes ${race.counter + (race.advancing ? BigInt(real) : 0n)}`,
+          )
         : result;
     },
     readdirSync: (...args: Parameters<typeof fs.readdirSync>) => {
@@ -26,10 +36,11 @@ vi.mock('node:fs', async (importOriginal) => {
   };
 });
 
-it.skipIf(process.platform !== 'linux').each(['0', '123456'])(
+it.skipIf(process.platform !== 'linux').each([0n, 123456n])(
   'retains a fork-raced session when proc stat exposes a fork counter stuck at %s',
   async (counter) => {
     race.counter = counter;
+    race.advancing = false;
     const dir = mkdtempSync(join(tmpdir(), 'session-zombie-fork-'));
     const pidFile = join(dir, 'worker.pid');
     // The supervisor remains outside the reported session and deliberately does
@@ -92,13 +103,17 @@ it.skipIf(process.platform !== 'linux').each(['0', '123456'])(
       expect(after, 'the surviving session must remain tracked alongside the supervisor group').toBe(before);
     } finally {
       race.afterSnapshot = undefined;
+      race.advancing = true;
       try {
         process.kill(Number(readFileSync(pidFile, 'utf8')), 'SIGKILL');
       } catch {
         /* The worker may already have exited. */
       }
-      await app.stop();
-      rmSync(dir, { recursive: true, force: true });
+      try {
+        await app.stop();
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
     }
   },
 );

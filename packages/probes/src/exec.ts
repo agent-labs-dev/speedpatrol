@@ -439,6 +439,8 @@ export function shellQuote(value: string): string {
 export type Background = {
   child: ChildProcess;
   output: () => string;
+  /** performance.now() just before the spawn, after Speedpatrol's own setup. */
+  started: number;
   /** True while the leader or any process of its group is alive. */
   running(): boolean;
   stop(): Promise<void>;
@@ -457,7 +459,8 @@ export function startBackground(
   options: { input?: boolean; session?: boolean } = {},
 ): Background {
   // The spawn forks, so a count read after it that exceeds this one proves the counter advances.
-  const forksBefore = forkCount();
+  const forksBefore = options.session ? forkCount() : undefined;
+  const started = performance.now();
   const child = spawn('bash', ['-c', command], {
     cwd,
     env: commandEnv(env),
@@ -512,6 +515,7 @@ export function startBackground(
   return {
     child,
     output: () => output,
+    started,
     running,
     async stop() {
       const settle = async (ms: number) => {
