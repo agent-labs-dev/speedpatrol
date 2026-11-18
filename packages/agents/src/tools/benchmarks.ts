@@ -26,6 +26,7 @@ Kinds (${BENCHMARK_KINDS.join(', ')}):
 - android: {"kind":"android","activity":"com.example/.MainActivity"}; ios: {"kind":"ios","bundleId":"com.example.app"}
 - maestro: {"kind":"maestro","flow":".maestro/open-settings.yaml"}
 - custom: {"kind":"custom","run":"node bench/render.js","metrics":{"render_ms":{"unit":"ms","better":"lower"}}} (prints {"metrics":{...}} as its last line)
+- pty: {"kind":"pty","run":"node dist/cli.js chat","ready":"SP_READY","input":"hello\\r","marker":"SP_REPLY"} (a terminal app; the app itself must write the exact marker text when the reply is visible, so only use it when the app does)
 Use \${NAME} for env vars and values captured by app.setup; never write a secret value.`;
 
 async function writeScouted(dir: string, benchmarks: Benchmark[]): Promise<void> {

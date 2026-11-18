@@ -124,4 +124,36 @@ describe('doctor', () => {
       await rm(root, { recursive: true, force: true });
     }
   });
+
+  it('checks a pty benchmark program and the script program that provides the terminal', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'doctor-pty-'));
+    try {
+      await mkdir(join(root, '.speedpatrol'));
+      await mkdir(join(root, 'tools'));
+      await writeFile(join(root, 'tools', 'script'), '#!/bin/sh\nexit 0\n', { mode: 0o755 });
+      await writeFile(
+        join(root, '.speedpatrol', 'speedpatrol.yml'),
+        JSON.stringify({
+          benchmarks: [
+            {
+              id: 'tui',
+              kind: 'pty',
+              run: 'missing-tui-app --chat',
+              marker: 'SP_REPLY',
+              env: { PATH: `${join(root, 'tools')}:/usr/bin:/bin` },
+            },
+          ],
+          agents: { scout: { enabled: false }, analyst: { enabled: false }, optimizer: { enabled: false } },
+        }),
+      );
+      const lines: string[] = [];
+      const ok = await doctor(root, (line) => lines.push(line));
+      expect(lines).toContain('✗ missing-tui-app: missing (used by benchmark tui)');
+      // Resolved with the benchmark's own PATH, as the probe starts it.
+      expect(lines).toContain(`✓ script: ${join(root, 'tools', 'script')}`);
+      expect(ok).toBe(false);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
 });

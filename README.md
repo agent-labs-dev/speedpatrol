@@ -94,6 +94,7 @@ Each benchmark is one critical path. Its `kind` selects how it is measured:
 | `android`, `ios`, `maestro` | Mobile app open and screen journeys | `total_time_ms`, `launch_ms`, `flow_ms` |
 | `command` | A build, a test run, a CLI command | `wall_ms`, `cpu_user_ms`, `max_rss_mb` |
 | `custom` | Any script that prints `{"metrics": {...}}` | the metrics it declares |
+| `pty` | A terminal app, to a marker the app writes, such as its first visible reply | `marker_ms`, `ready_ms` |
 
 Each run takes warmup iterations, then timed iterations, then one profiled iteration, so the profiler never slows a timed sample. A benchmark's primary metric decides its verdict; a slower secondary metric is reported as a trade-off. Speedpatrol does not record a run as a baseline when the machine was loaded or the primary metric was noisy (`--force-baseline` overrides this), and a critical benchmark that measured nothing fails the run. [Benchmarks and metrics](docs/benchmarks.md) lists every metric.
 

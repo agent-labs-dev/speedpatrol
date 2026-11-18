@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- A `pty` benchmark kind times a terminal app on a pseudo-terminal to an exact marker that the app writes, such as its first visible reply, optionally typing input when the app writes a ready marker. `doctor` checks the `script` program that provides the terminal (#38).
+
 ## [0.4.1] - 2026-11-16
 
 ### Changed

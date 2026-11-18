@@ -2,7 +2,16 @@ import { execFileSync } from 'node:child_process';
 import { once } from 'node:events';
 import { readFileSync } from 'node:fs';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { activeGroupCount, killAllGroups, killTree, runTimed, shellQuote, startBackground, waitUntil } from './exec.js';
+import {
+  activeGroupCount,
+  joinProcessRows,
+  killAllGroups,
+  killTree,
+  runTimed,
+  shellQuote,
+  startBackground,
+  waitUntil,
+} from './exec.js';
 
 /** Whether the process is gone or a zombie: a killed orphan stays a zombie until its reaper waits for it. */
 function stopped(pid: number): boolean {
@@ -136,5 +145,16 @@ describe('package-manager launcher environment', () => {
         await child.stop();
       }
     }
+  });
+});
+
+describe('macOS process table', () => {
+  it('joins ps rows with session ids and skips any other shape', () => {
+    const ps = '  412   400 S+\n  9 9 Ss\n\nPID PGID STAT\n  7 7 S\n  5 5\n  6 6 R extra\n';
+    const sids = '412 390\n9 9\n7 -1\n';
+    expect(joinProcessRows(ps, sids)).toEqual([
+      { pid: 412, pgrp: 400, session: 390, state: 'S+' },
+      { pid: 9, pgrp: 9, session: 9, state: 'Ss' },
+    ]);
   });
 });
