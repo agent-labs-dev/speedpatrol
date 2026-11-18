@@ -130,12 +130,13 @@ function macProcesses(): Process[] | undefined {
   }
 }
 
-function signalReaches(pgid: number): boolean {
+/** Only ESRCH proves a group gone: EPERM means a process of it exists under other credentials. */
+function groupGone(pgid: number): boolean {
   try {
     process.kill(-pgid, 0);
-    return true;
-  } catch {
     return false;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === 'ESRCH';
   }
 }
 
@@ -181,27 +182,31 @@ function readProcesses(): Process[] | undefined {
 
 /**
  * The process groups of a session that still have a live member, from a
- * reading of every process; undefined while that is unknown. A reading alone
- * cannot prove a session empty: a process of it can fork and exit while the
- * processes are read, and the reading misses its child. The child starts in
- * its parent's group, though, and a group signal check cannot race. So an
- * empty reading drops the id only once each group the session has had is
- * accounted for: it answers no signal, or the reading shows its members
- * (zombies, or another session's processes once the id is reused). A group
- * that answers but that the reading did not show keeps the session tracked,
- * unknown, until a later reading settles it. A signal check proves a group
- * exists, not that it is still the session's, so only groups a reading shows
- * are returned to be signalled.
+ * reading of every process; undefined while that is unknown, and empty for a
+ * session already dropped. A reading alone cannot prove a session empty: a
+ * process of it can fork and exit while the processes are read, and the
+ * reading misses its child. The child starts in its parent's group, though,
+ * and a group signal check is atomic. So an empty reading drops the id only
+ * once each group the session has had is accounted for: it is gone (ESRCH),
+ * or the reading shows its members (zombies, or another session's processes
+ * once the id is reused). A group that exists but that the reading did not
+ * show keeps the session tracked, unknown, until a later reading settles it.
+ * POSIX has no session-wide check, so a child that moves to a new group, or
+ * whose parent stays a zombie, during the reading is still missed. A signal
+ * check proves a group exists, not that it is still the session's, so only
+ * groups a reading shows are returned to be signalled.
  */
 function sessionGroups(sid: number): number[] | undefined {
-  const seen = sessions.get(sid) ?? new Set([sid]);
+  const seen = sessions.get(sid);
+  // Dropped once proven empty: the id may since belong to another session.
+  if (seen === undefined) return [];
   const table = readProcesses();
   if (table === undefined) return undefined;
   const pgids = [...new Set(table.filter((p) => p.session === sid && live(p.state)).map((p) => p.pgrp))];
   for (const pgid of pgids) seen.add(pgid);
   if (pgids.length > 0) return pgids;
   // Checked after the reading, so a child forked during it is still in a group checked here.
-  for (const pgid of seen) if (!signalReaches(pgid) || table.some((p) => p.pgrp === pgid)) seen.delete(pgid);
+  for (const pgid of seen) if (groupGone(pgid) || table.some((p) => p.pgrp === pgid)) seen.delete(pgid);
   if (seen.size > 0) return undefined;
   sessions.delete(sid);
   return [];
@@ -210,18 +215,19 @@ function sessionGroups(sid: number): number[] | undefined {
 /**
  * A session has no kill(2) of its own, so each of its groups is signalled: a
  * group signal reaches every member at once, and a group id stays taken while
- * the group has a member, unlike a bare pid. False when no reading showed the groups.
+ * the group has a member, unlike a bare pid. Groups in `sent` are skipped, then added.
  */
-function signalSession(sid: number, signal: NodeJS.Signals): boolean {
+function signalSession(sid: number, signal: NodeJS.Signals, sent?: Set<number>): void {
   const pgids = sessionGroups(sid);
   for (const pgid of pgids ?? []) {
+    if (sent?.has(pgid)) continue;
+    sent?.add(pgid);
     try {
       process.kill(-pgid, signal);
     } catch {
       /* The group emptied since the listing. */
     }
   }
-  return pgids !== undefined;
 }
 
 export function killAllGroups(signal: NodeJS.Signals): void {
@@ -415,13 +421,16 @@ export function startBackground(
     (child.exitCode === null && child.signalCode === null) ||
     (pgid !== undefined && groupAlive(pgid)) ||
     (sid !== undefined && (sessionGroups(sid)?.length ?? 1) > 0);
-  // A session signal that no reading backed is sent again once a reading succeeds.
-  let pending: NodeJS.Signals | undefined;
+  // A stop's session signal also reaches each group a later reading shows: one that no reading
+  // showed when it was sent (it failed, or a fork raced it) gets it once one does.
+  let current: NodeJS.Signals | undefined;
+  const sent = new Set<number>();
   const signalPending = () => {
-    if (pending && sid !== undefined && signalSession(sid, pending)) pending = undefined;
+    if (current && sid !== undefined) signalSession(sid, current, sent);
   };
   const signal = (name: NodeJS.Signals) => {
-    pending = name;
+    current = name;
+    sent.clear();
     signalPending();
     killTree(child, name);
   };
