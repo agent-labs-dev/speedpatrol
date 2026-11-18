@@ -19,6 +19,8 @@
     "check": "biome check .",
     "check:fix": "biome check --write .",
     "knip": "knip --no-config-hints",
+    "gate": "pnpm check && pnpm build && pnpm knip && pnpm test",
+    "gate:changed": "biome check --no-errors-on-unmatched $(git diff --name-only --diff-filter=d $(git merge-base origin/main HEAD)) && pnpm build && pnpm knip && vitest run --changed $(git merge-base origin/main HEAD)",
     "prepare": "husky"
   },
   "devDependencies": {
