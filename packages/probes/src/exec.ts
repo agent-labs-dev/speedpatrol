@@ -90,6 +90,21 @@ function readStat(path: string): { state: string; pgrp: string | undefined; sess
   return { state, pgrp, session };
 }
 
+const exited = (error: unknown) => ['ENOENT', 'ESRCH'].includes((error as NodeJS.ErrnoException).code ?? '');
+
+/** The state of a live thread of the process, if one is left; a thread that exits meanwhile is skipped. */
+function liveThreadState(pid: string): string | undefined {
+  for (const tid of readdirSync(`/proc/${pid}/task`)) {
+    try {
+      const { state } = readStat(`/proc/${pid}/task/${tid}/stat`);
+      if (live(state)) return state;
+    } catch (error) {
+      if (!exited(error)) throw error;
+    }
+  }
+  return undefined;
+}
+
 /**
  * Every process on Linux, from /proc; undefined without /proc. A process whose main thread has
  * exited reads as a zombie while its other threads run, so its state is a live thread's.
@@ -110,16 +125,10 @@ function linuxProcesses(): { processes: Process[]; complete: boolean } | undefin
     let row: ReturnType<typeof readStat>;
     try {
       row = readStat(`/proc/${pid}/stat`);
-      if (!live(row.state)) {
-        for (const tid of readdirSync(`/proc/${pid}/task`)) {
-          const thread = readStat(`/proc/${pid}/task/${tid}/stat`);
-          if (live(thread.state)) row.state = thread.state;
-        }
-      }
+      if (!live(row.state)) row.state = liveThreadState(pid) ?? row.state;
     } catch (error) {
       // Exited since the listing; any other failure leaves the process unknown.
-      if ((error as NodeJS.ErrnoException).code !== 'ENOENT' && (error as NodeJS.ErrnoException).code !== 'ESRCH')
-        complete = false;
+      if (!exited(error)) complete = false;
       return [];
     }
     return [{ pid: Number(pid), state: row.state, pgrp: Number(row.pgrp), session: Number(row.session) }];
