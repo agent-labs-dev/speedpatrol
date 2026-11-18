@@ -446,6 +446,10 @@ export function startBackground(
       if (!running()) return;
       signal('SIGKILL');
       await settle(5000);
+      // Without a reading of the session the stop cannot tell whether its processes are gone.
+      if (sid !== undefined && sessionGroups(sid) === undefined) {
+        throw new Error('Could not read the process table to confirm the terminal app stopped');
+      }
     },
   };
 }
