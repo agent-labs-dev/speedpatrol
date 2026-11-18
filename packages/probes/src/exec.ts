@@ -408,12 +408,13 @@ export function startBackground(
   child.stdout?.on('data', append);
   child.stderr?.on('data', append);
   child.on('error', (error) => append(Buffer.from(`${error.message}\n`)));
-  // The group can outlive its leader (a server backgrounded by the shell), so check both.
+  // The group can outlive its leader (a server backgrounded by the shell), so check both. A session
+  // still tracked after its reading may hold a live process the reading could not confirm.
   const pgid = child.pid;
   const running = () =>
     (child.exitCode === null && child.signalCode === null) ||
     (pgid !== undefined && groupAlive(pgid)) ||
-    (sid !== undefined && sessionGroups(sid).length > 0);
+    (sid !== undefined && (sessionGroups(sid).length > 0 || sessions.has(sid)));
   const signal = (name: NodeJS.Signals) => {
     if (sid !== undefined) signalSession(sid, name);
     killTree(child, name);
