@@ -1,0 +1,34 @@
+#!/usr/bin/env bash
+# pnpm gate:changed: the gate, scoped to this branch's changes.
+# Packages resolve each other through dist/, so vitest's import graph cannot see a consumer of a changed package:
+# test every changed package and the packages that depend on it, and every package for a change outside packages/.
+set -euo pipefail
+cd "$(git rev-parse --show-toplevel)"
+
+base=$(git merge-base origin/main HEAD)
+mapfile -d '' files < <(git diff -z --name-only --diff-filter=d "$base"; git ls-files -z --others --exclude-standard)
+
+if ((${#files[@]})); then
+  pnpm exec biome check --no-errors-on-unmatched --error-on-warnings "${files[@]}"
+fi
+pnpm build
+pnpm knip
+
+filters=()
+full=0
+for f in "${files[@]}"; do
+  case $f in
+    packages/*/*) pkg=${f#packages/}; filters+=(--filter "...{./packages/${pkg%%/*}}") ;;
+    *.md | docs/* | .github/*) ;;
+    *) full=1 ;;
+  esac
+done
+
+if ((full)); then
+  pnpm test
+elif ((${#filters[@]})); then
+  mapfile -t dirs < <(pnpm --silent "${filters[@]}" exec pwd)
+  pnpm exec vitest run "${dirs[@]}"
+else
+  echo "gate:changed: no test inputs changed"
+fi
