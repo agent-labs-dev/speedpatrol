@@ -7,10 +7,21 @@ set -euo pipefail
 cd "$(git rev-parse --show-toplevel)"
 
 base=$(git merge-base origin/main HEAD)
+list=$(mktemp)
+trap 'rm -f "$list"' EXIT
+
+# Each listing goes to a file first so a failing git command stops the gate instead of reading as no changes.
+read_list() {
+  : >"$list"
+  git diff -z --name-only "$@" "$base" >>"$list"
+  git ls-files -z --others --exclude-standard >>"$list"
+}
 changed=()
-while IFS= read -r -d '' f; do changed+=("$f"); done < <(git diff -z --name-only "$base"; git ls-files -z --others --exclude-standard)
+read_list
+while IFS= read -r -d '' f; do changed+=("$f"); done <"$list"
 existing=()
-while IFS= read -r -d '' f; do existing+=("$f"); done < <(git diff -z --name-only --diff-filter=d "$base"; git ls-files -z --others --exclude-standard)
+read_list --diff-filter=d
+while IFS= read -r -d '' f; do existing+=("$f"); done <"$list"
 
 if ((${#existing[@]})); then
   pnpm exec biome check --no-errors-on-unmatched --error-on-warnings "${existing[@]}"
@@ -31,8 +42,9 @@ done
 if ((full)); then
   pnpm test
 elif ((${#filters[@]})); then
+  listing=$(pnpm --silent "${filters[@]}" exec pwd)
   dirs=()
-  while IFS= read -r d; do dirs+=("$d"); done < <(pnpm --silent "${filters[@]}" exec pwd)
+  while IFS= read -r d; do dirs+=("$d"); done <<<"$listing"
   pnpm exec vitest run --passWithNoTests "${dirs[@]}"
 else
   echo "gate:changed: no test inputs changed"
