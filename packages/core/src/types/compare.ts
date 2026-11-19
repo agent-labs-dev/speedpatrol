@@ -7,7 +7,8 @@ import type { Better, Summary, Unit } from './metrics.js';
  * - `regression` / `improvement`: significant, and larger than both thresholds.
  * - `unchanged`: the difference is within the thresholds, or not significant
  *   while the samples are steady.
- * - `noisy`: not significant, and too variable to say that nothing changed.
+ * - `noisy`: a large change that is not significant, because the samples are
+ *   too variable or too few for the test to reach alpha.
  * - `missing`: one side has no samples.
  */
 export type Verdict = 'regression' | 'improvement' | 'unchanged' | 'noisy' | 'missing';

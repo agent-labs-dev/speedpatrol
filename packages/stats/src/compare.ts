@@ -10,7 +10,7 @@ import {
   type Verdict,
 } from '@speedpatrol/core';
 import { summarize, trimOutliers } from './summary.js';
-import { bootstrapDelta, mannWhitney, pairedSignTest, signTestRounds } from './tests.js';
+import { bootstrapDelta, lowestP, mannWhitney, pairedSignTest, signTestRounds } from './tests.js';
 
 export type MetricVerdict = Pick<
   MetricComparison,
@@ -23,6 +23,8 @@ export type MetricVerdict = Pick<
  * exclude no change) and larger than both thresholds. A small but real change
  * stays `unchanged`; a large change that the samples cannot separate from
  * noise is `noisy`, which asks for more iterations rather than a decision.
+ * Too few samples for the test to reach alpha at all is such a case: after
+ * outlier trimming a busy machine can leave fewer samples than it measured.
  */
 export function compareSamples(
   base: readonly number[],
@@ -51,7 +53,11 @@ export function compareSamples(
   if (significant && large) {
     const worse = better === 'lower' ? deltaAbs > 0 : deltaAbs < 0;
     verdict = worse ? 'regression' : 'improvement';
-  } else if (!significant && Math.max(bs.cv, hs.cv) > thresholds.maxCv && large) {
+  } else if (
+    !significant &&
+    large &&
+    (Math.max(bs.cv, hs.cv) > thresholds.maxCv || lowestP(b.length, h.length, paired) >= thresholds.alpha)
+  ) {
     verdict = 'noisy';
   } else {
     verdict = 'unchanged';

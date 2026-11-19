@@ -2,7 +2,15 @@ import { thresholdsSchema } from '@speedpatrol/core';
 import { describe, expect, it } from 'vitest';
 import { compareRuns, compareSamples, worstVerdict } from './compare.js';
 import { quantile, summarize, trimOutliers } from './summary.js';
-import { bootstrapDelta, mannWhitney, mulberry32, pairedSignTest, signTestRounds } from './tests.js';
+import {
+  bootstrapDelta,
+  lowestP,
+  mannWhitney,
+  mulberry32,
+  pairedSignTest,
+  rankTestSamples,
+  signTestRounds,
+} from './tests.js';
 
 const thresholds = thresholdsSchema.parse({});
 
@@ -63,6 +71,12 @@ describe('compareSamples', () => {
       name: 'a large change hidden in noise',
       base: latencies(100, 80, 6, 1),
       head: latencies(115, 80, 6, 2),
+      verdict: 'noisy',
+    },
+    {
+      name: 'a large, steady change on too few samples for the test to decide',
+      base: [10, 10.1, 10.2, 10.3],
+      head: [60, 60.1, 60.2, 60.3, 60.4, 60.5],
       verdict: 'noisy',
     },
     {
@@ -152,7 +166,7 @@ describe('worstVerdict', () => {
 
 it('does not mistake iterations for independent A/B evidence', () => {
   expect(pairedSignTest([100, 100, 100], [80, 80, 80]).p).toBeCloseTo(0.25);
-  expect(compareSamples([100, 100, 100], [80, 80, 80], 'lower', thresholds, true).verdict).not.toBe('improvement');
+  expect(compareSamples([100, 100, 100], [80, 80, 80], 'lower', thresholds, true).verdict).toBe('noisy');
   expect(compareSamples(Array(8).fill(100), Array(8).fill(80), 'lower', thresholds, true).verdict).toBe('improvement');
   expect(pairedSignTest([100, 100, 100], [100, 100, 100]).p).toBe(1);
   expect(pairedSignTest([100, 100, 100, 100], [80, 80, 120, 120]).p).toBe(1);
@@ -167,6 +181,16 @@ it.each([
   expect(signTestRounds(alpha, disagreeing)).toBe(rounds);
   const head = Array.from({ length: rounds - 1 }, (_, i) => (i < disagreeing ? -1 : 1));
   expect(pairedSignTest(Array(rounds - 1).fill(0), head).p).toBeGreaterThanOrEqual(alpha);
+});
+it.each([
+  // alpha, samples per side: complete separation of n against n first gives p < alpha.
+  [0.01, 6],
+  [0.05, 4],
+])('needs the fewest rank-test samples for alpha %f (%i)', (alpha, samples) => {
+  expect(rankTestSamples(alpha)).toBe(samples);
+  expect(lowestP(samples, samples, false)).toBeLessThan(alpha);
+  expect(lowestP(samples - 1, samples - 1, false)).toBeGreaterThanOrEqual(alpha);
+  expect(lowestP(signTestRounds(alpha), signTestRounds(alpha), true)).toBeLessThan(alpha);
 });
 it('resamples paired rounds together in confidence intervals', () => {
   expect(bootstrapDelta([1, 100, 10000], [2, 200, 20000], { paired: true })).toEqual([1, 1]);

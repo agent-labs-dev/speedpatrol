@@ -101,6 +101,23 @@ export function signTestRounds(alpha: number, disagreeing = 0): number {
   }
 }
 
+/**
+ * The smallest p the test can give for these sample sizes: every head sample
+ * beyond every base sample. When it is not below alpha, no change, however
+ * large, can be significant.
+ */
+export function lowestP(baseSize: number, headSize: number, paired: boolean): number {
+  const base = Array.from({ length: baseSize }, (_, i) => i);
+  const head = Array.from({ length: headSize }, (_, i) => baseSize + i);
+  return (paired ? pairedSignTest(base, head) : mannWhitney(base, head)).p;
+}
+
+/** The fewest samples per side for which the Mann-Whitney test can reach p < alpha at all. */
+export function rankTestSamples(alpha: number): number {
+  if (!(alpha > 0 && alpha <= 1)) throw new Error(`alpha must be in (0, 1], got ${alpha}`);
+  for (let n = 1; ; n++) if (lowestP(n, n, false) < alpha) return n;
+}
+
 function resampleMedian(values: readonly number[], random: () => number): number {
   const sample = new Array<number>(values.length);
   for (let i = 0; i < values.length; i++) sample[i] = values[Math.floor(random() * values.length)]!;

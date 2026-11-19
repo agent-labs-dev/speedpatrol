@@ -25,13 +25,13 @@ For each metric, Speedpatrol compares the samples of two sides (ADR 0001):
 | Verdict | When |
 | --- | --- |
 | `regression` / `improvement` | p < `alpha` **and** the interval excludes 0 **and** the change clears `relative` **and** `absolute` |
-| `noisy` | Not significant, the change is large, and the samples vary more than `maxCv`: measure more |
+| `noisy` | Not significant, the change is large, and the samples vary more than `maxCv` or are too few for the test to reach `alpha`: measure more |
 | `unchanged` | Anything else |
 | `missing` | One side has no samples |
 
 A comparison's verdict is the worst verdict of its benchmarks' primary metrics. Secondary metrics are reported and charted, but do not decide.
 
-With the defaults (`alpha: 0.01`), each side needs about 8 samples before a difference can be significant at all; the default is 15.
+With the defaults (`alpha: 0.01`), each side needs at least 6 samples after outlier trimming before a difference can be significant at all, and trimming can keep as few as half; the default is 15.
 
 ## Baselines and machines
 

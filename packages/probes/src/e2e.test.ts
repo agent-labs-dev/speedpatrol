@@ -3,7 +3,7 @@ import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:f
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { loadConfig, Store } from '@speedpatrol/core';
-import { signTestRounds } from '@speedpatrol/stats';
+import { rankTestSamples, signTestRounds } from '@speedpatrol/stats';
 import { chromium, errors } from 'playwright';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { stopActiveSessions } from './app.js';
@@ -67,6 +67,14 @@ it('detects asynchronous screen readiness without adding selector retry backoff'
  * `work()` slower, which an A/B compare must flag on the benchmarks that call
  * it and on no other.
  */
+/**
+ * Iterations for each side of the baseline comparison. Outlier trimming keeps
+ * at least half of a busy runner's samples, and that half must still be enough
+ * for the rank test to reach alpha.
+ */
+const baselineIterations = (loaded: Awaited<ReturnType<typeof loadConfig>>) =>
+  2 * rankTestSamples(loaded.config.thresholds.alpha);
+
 describe('measure and compare the fixture app', () => {
   let repo: string;
   beforeAll(() => {
@@ -89,11 +97,11 @@ describe('measure and compare the fixture app', () => {
   it('measures every probe kind and records a baseline', async () => {
     const loaded = await loadConfig(repo);
     const store = new Store(loaded.dir);
-    const run = await measure({ loaded, store, purpose: 'baseline', iterations: 6 });
+    const run = await measure({ loaded, store, purpose: 'baseline', iterations: baselineIterations(loaded) });
     expect(run.failed).toBeUndefined();
     const byId = Object.fromEntries(run.results.map((result) => [result.benchmark, result]));
     for (const result of run.results) expect(result.errors, result.benchmark).toEqual([]);
-    expect(byId['api.items']!.metrics.total_ms!.values).toHaveLength(6);
+    expect(byId['api.items']!.metrics.total_ms!.values).toHaveLength(baselineIterations(loaded));
     expect(byId['web.home']!.metrics).toHaveProperty('fcp_ms');
     expect(byId['web.home']!.metrics).toHaveProperty('step.open-settings_ms');
     expect(byId['web.home']!.primary).toBe('flow_ms');
@@ -137,7 +145,13 @@ describe('measure and compare the fixture app', () => {
     expect(comparison.verdict).toBe('regression');
 
     // The baseline path finds the earlier commit's baseline on this machine.
-    const run = await measure({ loaded, store, purpose: 'baseline', only: ['api.items'], iterations: 10 });
+    const run = await measure({
+      loaded,
+      store,
+      purpose: 'baseline',
+      only: ['api.items'],
+      iterations: baselineIterations(loaded),
+    });
     const againstBaseline = await compareWithBaseline(loaded, store, run);
     expect('comparison' in againstBaseline).toBe(true);
     if ('comparison' in againstBaseline) {
