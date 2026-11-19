@@ -19,6 +19,8 @@
     "check": "biome check .",
     "check:fix": "biome check --write .",
     "knip": "knip --no-config-hints",
+    "gate": "pnpm check --error-on-warnings && pnpm build && pnpm knip && pnpm test",
+    "gate:changed": "scripts/gate-changed",
     "prepare": "husky"
   },
   "devDependencies": {

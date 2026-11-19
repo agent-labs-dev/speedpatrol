@@ -1,0 +1,51 @@
+#!/usr/bin/env bash
+# pnpm gate:changed: the gate, scoped to this branch's changes.
+# Packages resolve each other through dist/, so vitest's import graph cannot see a consumer of a changed package:
+# test every changed package and the packages that depend on it, and every package for a change outside packages/
+# (documentation and workflows excepted). A deleted file counts as changed.
+set -euo pipefail
+cd "$(git rev-parse --show-toplevel)"
+
+base=$(git merge-base origin/main HEAD)
+list=$(mktemp)
+trap 'rm -f "$list"' EXIT
+
+# Each listing goes to a file first so a failing git command stops the gate instead of reading as no changes.
+read_list() {
+  : >"$list"
+  git diff -z --name-only "$@" "$base" >>"$list"
+  git ls-files -z --others --exclude-standard >>"$list"
+}
+changed=()
+read_list
+while IFS= read -r -d '' f; do changed+=("$f"); done <"$list"
+existing=()
+read_list --diff-filter=d
+while IFS= read -r -d '' f; do existing+=("$f"); done <"$list"
+
+if ((${#existing[@]})); then
+  pnpm exec biome check --no-errors-on-unmatched --error-on-warnings "${existing[@]}"
+fi
+pnpm build
+pnpm knip
+
+filters=()
+full=0
+for f in ${changed[@]+"${changed[@]}"}; do
+  case $f in
+    packages/*/*) pkg=${f#packages/}; filters+=(--filter "...{./packages/${pkg%%/*}}") ;;
+    *.md | docs/* | .github/*) ;;
+    *) full=1 ;;
+  esac
+done
+
+if ((full)); then
+  pnpm test
+elif ((${#filters[@]})); then
+  listing=$(pnpm --silent "${filters[@]}" exec pwd)
+  dirs=()
+  while IFS= read -r d; do dirs+=("$d"); done <<<"$listing"
+  pnpm exec vitest run --passWithNoTests "${dirs[@]}"
+else
+  echo "gate:changed: no test inputs changed"
+fi
