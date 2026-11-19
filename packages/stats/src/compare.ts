@@ -56,20 +56,13 @@ export function compareSamples(
   } else if (
     !significant &&
     large &&
-    (Math.max(bs.cv, hs.cv) > thresholds.maxCv || lowestP(...decidingSizes(b, h, paired), paired) >= thresholds.alpha)
+    (Math.max(bs.cv, hs.cv) > thresholds.maxCv || lowestP(b, h, paired) >= thresholds.alpha)
   ) {
     verdict = 'noisy';
   } else {
     verdict = 'unchanged';
   }
   return { deltaPct, deltaAbs, ci, pValue: p, verdict, ...(significant && !large ? { underThreshold: true } : {}) };
-}
-
-/** The sample sizes the test decides on: paired rounds that tie carry no evidence. */
-function decidingSizes(base: readonly number[], head: readonly number[], paired: boolean): [number, number] {
-  if (!paired) return [base.length, head.length];
-  const untied = base.filter((value, i) => value !== head[i]).length;
-  return [untied, untied];
 }
 
 function comparableSummary(values: readonly number[]) {

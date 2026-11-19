@@ -102,15 +102,23 @@ export function signTestRounds(alpha: number, disagreeing = 0): number {
 }
 
 /**
- * The smallest p the test can give for these sample sizes: every head sample
- * beyond every base sample, all values distinct. When it is not below alpha, no
- * change, however large, can be significant. For the paired sign test the
- * sizes are the non-tied rounds, since tied rounds carry no evidence.
+ * The p these samples would give if the change separated them completely:
+ * every head sample beyond every base sample, each side keeping its own ties.
+ * When it is not below alpha, no change, however large, can be significant.
+ * Paired rounds that tie carry no evidence for the sign test, so only the
+ * non-tied rounds count.
  */
-export function lowestP(baseSize: number, headSize: number, paired: boolean): number {
-  const base = Array.from({ length: baseSize }, (_, i) => i);
-  const head = Array.from({ length: headSize }, (_, i) => baseSize + i);
-  return (paired ? pairedSignTest(base, head) : mannWhitney(base, head)).p;
+export function lowestP(base: readonly number[], head: readonly number[], paired: boolean): number {
+  if (paired) {
+    const rounds = base.filter((value, i) => value !== head[i]).length;
+    return pairedSignTest(Array(rounds).fill(0), Array(rounds).fill(1)).p;
+  }
+  const top = Math.max(...base);
+  const lowest = Math.min(...head);
+  return mannWhitney(
+    base,
+    head.map((value) => value - lowest + top + Math.max(1, Math.abs(top))),
+  ).p;
 }
 
 /**

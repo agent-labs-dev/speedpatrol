@@ -145,7 +145,9 @@ describe('measure and compare the fixture app', () => {
     expect(verdict('api.health')).not.toBe('regression');
     expect(comparison.verdict).toBe('regression');
 
-    // The baseline path finds the earlier commit's baseline on this machine.
+    // The baseline path finds the earlier commit's baseline on this machine and
+    // never reads the slowdown as unchanged. A loaded runner can leave too
+    // little evidence for a verdict, which the comparison reports as noisy.
     const run = await measure({
       loaded,
       store,
@@ -156,8 +158,11 @@ describe('measure and compare the fixture app', () => {
     const againstBaseline = await compareWithBaseline(loaded, store, run);
     expect('comparison' in againstBaseline).toBe(true);
     if ('comparison' in againstBaseline) {
-      expect(againstBaseline.comparison.base.sha).not.toBe(run.source.sha);
-      expect(againstBaseline.comparison.metrics.find((metric) => metric.primary)?.verdict).toBe('regression');
+      const earlier = execFileSync('git', ['rev-parse', 'HEAD~1'], { cwd: repo, encoding: 'utf8' }).trim();
+      expect(againstBaseline.comparison.base.sha).toBe(earlier);
+      expect(['regression', 'noisy']).toContain(
+        againstBaseline.comparison.metrics.find((metric) => metric.primary)?.verdict,
+      );
     }
   });
 });

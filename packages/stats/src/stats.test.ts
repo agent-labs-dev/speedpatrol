@@ -203,11 +203,14 @@ it.each([
   expect(mannWhitney(...sides(samples)).p).toBeLessThan(alpha);
   expect(mannWhitney(...sides(samples - 1)).p).toBeGreaterThanOrEqual(alpha);
 });
-it('gives the lowest p the test can reach at these sizes', () => {
-  expect(lowestP(rankTestSamples(0.01), rankTestSamples(0.01), false)).toBeLessThan(0.01);
-  expect(lowestP(rankTestSamples(0.01) - 1, rankTestSamples(0.01) - 1, false)).toBeGreaterThanOrEqual(0.01);
-  expect(lowestP(signTestRounds(0.01), signTestRounds(0.01), true)).toBeLessThan(0.01);
-  expect(lowestP(signTestRounds(0.01) - 1, signTestRounds(0.01) - 1, true)).toBeGreaterThanOrEqual(0.01);
+it('gives the p these samples would reach if the change separated them', () => {
+  const distinct = (n: number) => Array.from({ length: n }, (_, i) => 10 + i / 10);
+  expect(lowestP(distinct(6), distinct(6), false)).toBeLessThan(0.01);
+  expect(lowestP(distinct(5), distinct(5), false)).toBeGreaterThanOrEqual(0.01);
+  // Ties within each side shrink the variance: five tied samples per side can reach alpha.
+  expect(lowestP(Array(5).fill(10), Array(5).fill(11), false)).toBeLessThan(0.01);
+  expect(lowestP(Array(8).fill(100), Array(8).fill(80), true)).toBeLessThan(0.01);
+  expect(lowestP(Array(8).fill(100), [80, 80, 80, 80, 80, 100, 100, 100], true)).toBeGreaterThanOrEqual(0.01);
 });
 it('resamples paired rounds together in confidence intervals', () => {
   expect(bootstrapDelta([1, 100, 10000], [2, 200, 20000], { paired: true })).toEqual([1, 1]);
