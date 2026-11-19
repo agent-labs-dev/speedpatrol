@@ -168,6 +168,10 @@ it('does not mistake iterations for independent A/B evidence', () => {
   expect(pairedSignTest([100, 100, 100], [80, 80, 80]).p).toBeCloseTo(0.25);
   expect(compareSamples([100, 100, 100], [80, 80, 80], 'lower', thresholds, true).verdict).toBe('noisy');
   expect(compareSamples(Array(8).fill(100), Array(8).fill(80), 'lower', thresholds, true).verdict).toBe('improvement');
+  // Eight rounds, but three tie: five non-tied rounds cannot reach alpha however large the change.
+  expect(
+    compareSamples(Array(8).fill(100), [80, 80, 80, 80, 80, 100, 100, 100], 'lower', thresholds, true).verdict,
+  ).toBe('noisy');
   expect(pairedSignTest([100, 100, 100], [100, 100, 100]).p).toBe(1);
   expect(pairedSignTest([100, 100, 100, 100], [80, 80, 120, 120]).p).toBe(1);
 });
@@ -183,14 +187,27 @@ it.each([
   expect(pairedSignTest(Array(rounds - 1).fill(0), head).p).toBeGreaterThanOrEqual(alpha);
 });
 it.each([
-  // alpha, samples per side: complete separation of n against n first gives p < alpha.
-  [0.01, 6],
-  [0.05, 4],
-])('needs the fewest rank-test samples for alpha %f (%i)', (alpha, samples) => {
-  expect(rankTestSamples(alpha)).toBe(samples);
-  expect(lowestP(samples, samples, false)).toBeLessThan(alpha);
-  expect(lowestP(samples - 1, samples - 1, false)).toBeGreaterThanOrEqual(alpha);
-  expect(lowestP(signTestRounds(alpha), signTestRounds(alpha), true)).toBeLessThan(alpha);
+  // alpha, disagreeing samples, samples per side: n against n with U = disagreeing first gives p < alpha.
+  [0.01, 0, 6],
+  [0.01, 1, 6],
+  [0.05, 0, 4],
+  [0.05, 1, 5],
+])('needs the fewest rank-test samples for alpha %f with %i disagreeing (%i)', (alpha, disagreeing, samples) => {
+  expect(rankTestSamples(alpha, disagreeing)).toBe(samples);
+  const sides = (n: number) => {
+    const base = Array.from({ length: n }, (_, i) => i);
+    if (disagreeing) base[n - 1] = n + disagreeing - 0.5;
+    return [base, Array.from({ length: n }, (_, i) => n + i)] as const;
+  };
+  expect(mannWhitney(...sides(samples)).u).toBe(disagreeing);
+  expect(mannWhitney(...sides(samples)).p).toBeLessThan(alpha);
+  expect(mannWhitney(...sides(samples - 1)).p).toBeGreaterThanOrEqual(alpha);
+});
+it('gives the lowest p the test can reach at these sizes', () => {
+  expect(lowestP(rankTestSamples(0.01), rankTestSamples(0.01), false)).toBeLessThan(0.01);
+  expect(lowestP(rankTestSamples(0.01) - 1, rankTestSamples(0.01) - 1, false)).toBeGreaterThanOrEqual(0.01);
+  expect(lowestP(signTestRounds(0.01), signTestRounds(0.01), true)).toBeLessThan(0.01);
+  expect(lowestP(signTestRounds(0.01) - 1, signTestRounds(0.01) - 1, true)).toBeGreaterThanOrEqual(0.01);
 });
 it('resamples paired rounds together in confidence intervals', () => {
   expect(bootstrapDelta([1, 100, 10000], [2, 200, 20000], { paired: true })).toEqual([1, 1]);

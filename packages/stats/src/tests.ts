@@ -103,8 +103,9 @@ export function signTestRounds(alpha: number, disagreeing = 0): number {
 
 /**
  * The smallest p the test can give for these sample sizes: every head sample
- * beyond every base sample. When it is not below alpha, no change, however
- * large, can be significant.
+ * beyond every base sample, all values distinct. When it is not below alpha, no
+ * change, however large, can be significant. For the paired sign test the
+ * sizes are the non-tied rounds, since tied rounds carry no evidence.
  */
 export function lowestP(baseSize: number, headSize: number, paired: boolean): number {
   const base = Array.from({ length: baseSize }, (_, i) => i);
@@ -112,10 +113,21 @@ export function lowestP(baseSize: number, headSize: number, paired: boolean): nu
   return (paired ? pairedSignTest(base, head) : mannWhitney(base, head)).p;
 }
 
-/** The fewest samples per side for which the Mann-Whitney test can reach p < alpha at all. */
-export function rankTestSamples(alpha: number): number {
+/**
+ * The fewest samples per side for which the Mann-Whitney test reaches
+ * p < alpha when `disagreeing` base samples lie beyond one head sample each,
+ * the rank-test counterpart of `signTestRounds`. With no disagreeing sample
+ * this is the minimum a comparison needs to decide anything.
+ */
+export function rankTestSamples(alpha: number, disagreeing = 0): number {
   if (!(alpha > 0 && alpha <= 1)) throw new Error(`alpha must be in (0, 1], got ${alpha}`);
-  for (let n = 1; ; n++) if (lowestP(n, n, false) < alpha) return n;
+  for (let n = disagreeing + 1; ; n++) {
+    const base = Array.from({ length: n }, (_, i) => i);
+    const head = Array.from({ length: n }, (_, i) => n + i);
+    // The largest base sample moves past `disagreeing` head samples: U = disagreeing.
+    if (disagreeing) base[n - 1] = n + disagreeing - 0.5;
+    if (mannWhitney(base, head).p < alpha) return n;
+  }
 }
 
 function resampleMedian(values: readonly number[], random: () => number): number {

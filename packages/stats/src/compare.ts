@@ -56,13 +56,20 @@ export function compareSamples(
   } else if (
     !significant &&
     large &&
-    (Math.max(bs.cv, hs.cv) > thresholds.maxCv || lowestP(b.length, h.length, paired) >= thresholds.alpha)
+    (Math.max(bs.cv, hs.cv) > thresholds.maxCv || lowestP(...decidingSizes(b, h, paired), paired) >= thresholds.alpha)
   ) {
     verdict = 'noisy';
   } else {
     verdict = 'unchanged';
   }
   return { deltaPct, deltaAbs, ci, pValue: p, verdict, ...(significant && !large ? { underThreshold: true } : {}) };
+}
+
+/** The sample sizes the test decides on: paired rounds that tie carry no evidence. */
+function decidingSizes(base: readonly number[], head: readonly number[], paired: boolean): [number, number] {
+  if (!paired) return [base.length, head.length];
+  const untied = base.filter((value, i) => value !== head[i]).length;
+  return [untied, untied];
 }
 
 function comparableSummary(values: readonly number[]) {
@@ -149,9 +156,10 @@ export function compareRuns(baseRuns: readonly Run[], headRuns: readonly Run[], 
       );
       const dropped = Math.max(br.length, hr.length) - pairs.length;
       if (paired && dropped) warnings.push(`${id}.${name}: omitted ${dropped} incomplete paired rounds.`);
-      if (paired && pairs.length < minimumRounds)
+      const untied = pairs.filter(([b, h]) => b !== h).length;
+      if (paired && untied < minimumRounds)
         warnings.push(
-          `${id}.${name}: ${pairs.length} complete rounds; the exact sign test needs at least ${minimumRounds} non-tied rounds for p < ${options.thresholds.alpha}. This comparison is exploratory.`,
+          `${id}.${name}: ${untied} non-tied rounds of ${pairs.length} complete; the exact sign test needs at least ${minimumRounds} non-tied rounds for p < ${options.thresholds.alpha}. This comparison is exploratory.`,
         );
       const bv = paired ? pairs.map(([value]) => value) : (bm?.values ?? []);
       const hv = paired ? pairs.map(([, value]) => value) : (hm?.values ?? []);

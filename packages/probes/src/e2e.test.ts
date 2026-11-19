@@ -62,18 +62,19 @@ it('detects asynchronous screen readiness without adding selector retry backoff'
 });
 
 /**
+ * Iterations for each side of the baseline comparison. Outlier trimming keeps
+ * at least half of a busy runner's samples, and that half must still reach
+ * alpha with one noisy sample on the wrong side, as the A/B rounds below do.
+ */
+const baselineIterations = (loaded: Awaited<ReturnType<typeof loadConfig>>) =>
+  2 * rankTestSamples(loaded.config.thresholds.alpha, 1);
+
+/**
  * The whole measuring path against real processes and a real Chromium: the
  * fixture app's server, page, CLI and script, then a commit that makes
  * `work()` slower, which an A/B compare must flag on the benchmarks that call
  * it and on no other.
  */
-/**
- * Iterations for each side of the baseline comparison. Outlier trimming keeps
- * at least half of a busy runner's samples, and that half must still be enough
- * for the rank test to reach alpha.
- */
-const baselineIterations = (loaded: Awaited<ReturnType<typeof loadConfig>>) =>
-  2 * rankTestSamples(loaded.config.thresholds.alpha);
 
 describe('measure and compare the fixture app', () => {
   let repo: string;

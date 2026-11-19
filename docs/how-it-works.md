@@ -31,7 +31,7 @@ For each metric, Speedpatrol compares the samples of two sides (ADR 0001):
 
 A comparison's verdict is the worst verdict of its benchmarks' primary metrics. Secondary metrics are reported and charted, but do not decide.
 
-With the defaults (`alpha: 0.01`), each side needs at least 6 samples after outlier trimming before a difference can be significant at all, and trimming can keep as few as half; the default is 15.
+With the defaults (`alpha: 0.01`), two sides of 5 samples each cannot be significant however large the difference, and outlier trimming can keep as few as half of a run's samples; the default is 15.
 
 ## Baselines and machines
 
