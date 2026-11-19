@@ -101,6 +101,26 @@ export function signTestRounds(alpha: number, disagreeing = 0): number {
   }
 }
 
+/**
+ * The p these samples would give if the change separated them completely:
+ * every head sample beyond every base sample, each side keeping its own ties.
+ * When it is not below alpha, no change, however large, can be significant.
+ * Paired rounds that tie carry no evidence for the sign test, so only the
+ * non-tied rounds count.
+ */
+export function lowestP(base: readonly number[], head: readonly number[], paired: boolean): number {
+  if (paired) {
+    const rounds = base.filter((value, i) => value !== head[i]).length;
+    return pairedSignTest(Array(rounds).fill(0), Array(rounds).fill(1)).p;
+  }
+  const top = Math.max(...base);
+  const lowest = Math.min(...head);
+  return mannWhitney(
+    base,
+    head.map((value) => value - lowest + top + Math.max(1, Math.abs(top))),
+  ).p;
+}
+
 function resampleMedian(values: readonly number[], random: () => number): number {
   const sample = new Array<number>(values.length);
   for (let i = 0; i < values.length; i++) sample[i] = values[Math.floor(random() * values.length)]!;

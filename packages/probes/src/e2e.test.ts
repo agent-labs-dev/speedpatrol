@@ -137,12 +137,16 @@ describe('measure and compare the fixture app', () => {
     expect(comparison.verdict).toBe('regression');
 
     // The baseline path finds the earlier commit's baseline on this machine.
+    // Its verdict compares two runs taken at different times, so it depends on
+    // the runner's load; the A/B rounds above and the stats table test decide.
     const run = await measure({ loaded, store, purpose: 'baseline', only: ['api.items'], iterations: 10 });
     const againstBaseline = await compareWithBaseline(loaded, store, run);
     expect('comparison' in againstBaseline).toBe(true);
     if ('comparison' in againstBaseline) {
-      expect(againstBaseline.comparison.base.sha).not.toBe(run.source.sha);
-      expect(againstBaseline.comparison.metrics.find((metric) => metric.primary)?.verdict).toBe('regression');
+      const earlier = execFileSync('git', ['rev-parse', 'HEAD~1'], { cwd: repo, encoding: 'utf8' }).trim();
+      expect(againstBaseline.comparison.base.sha).toBe(earlier);
+      expect(againstBaseline.comparison.head.sha).toBe(run.source.sha);
+      expect(againstBaseline.comparison.metrics.find((metric) => metric.primary)?.benchmark).toBe('api.items');
     }
   });
 });

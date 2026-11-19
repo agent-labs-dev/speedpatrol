@@ -28,7 +28,7 @@ Start with `speedpatrol doctor`. It checks Node, git, the config, the tools your
 
 ## Timings
 
-**Many `noisy` verdicts.** `noisy` means the change looks large but the samples vary too much (more than `thresholds.maxCv`) for a verdict. It is not a regression, and it does not start the analyst: the analyst only runs for a regression that the A/B confirmation reproduced. Usual causes, most likely first:
+**Many `noisy` verdicts.** `noisy` means the change looks large but the samples vary too much (more than `thresholds.maxCv`), or are too few for the test to reach `thresholds.alpha` (a baseline run after outlier trimming, or an A/B comparison with too few rounds that differ), for a verdict. It is not a regression, and it does not start the analyst: the analyst only runs for a regression that the A/B confirmation reproduced. Usual causes, most likely first:
 
 - The benchmark times a remote service (a shared dev or staging backend) whose latency changes from minute to minute. Measure a local server when you can, or accept that such a benchmark only catches large changes.
 - Other work on the machine during the measurement. Move it to another time.
