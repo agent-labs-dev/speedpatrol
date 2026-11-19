@@ -121,23 +121,6 @@ export function lowestP(base: readonly number[], head: readonly number[], paired
   ).p;
 }
 
-/**
- * The fewest samples per side for which the Mann-Whitney test reaches
- * p < alpha when `disagreeing` base samples lie beyond one head sample each,
- * the rank-test counterpart of `signTestRounds`. With no disagreeing sample
- * this is the minimum a comparison needs to decide anything.
- */
-export function rankTestSamples(alpha: number, disagreeing = 0): number {
-  if (!(alpha > 0 && alpha <= 1)) throw new Error(`alpha must be in (0, 1], got ${alpha}`);
-  for (let n = disagreeing + 1; ; n++) {
-    const base = Array.from({ length: n }, (_, i) => i);
-    const head = Array.from({ length: n }, (_, i) => n + i);
-    // The largest base sample moves past `disagreeing` head samples: U = disagreeing.
-    if (disagreeing) base[n - 1] = n + disagreeing - 0.5;
-    if (mannWhitney(base, head).p < alpha) return n;
-  }
-}
-
 function resampleMedian(values: readonly number[], random: () => number): number {
   const sample = new Array<number>(values.length);
   for (let i = 0; i < values.length; i++) sample[i] = values[Math.floor(random() * values.length)]!;

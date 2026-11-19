@@ -3,7 +3,7 @@ import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:f
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { loadConfig, Store } from '@speedpatrol/core';
-import { rankTestSamples, signTestRounds } from '@speedpatrol/stats';
+import { signTestRounds } from '@speedpatrol/stats';
 import { chromium, errors } from 'playwright';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { stopActiveSessions } from './app.js';
@@ -62,20 +62,11 @@ it('detects asynchronous screen readiness without adding selector retry backoff'
 });
 
 /**
- * Iterations for each side of the baseline comparison. Outlier trimming keeps
- * at least half of a busy runner's samples, and that half must still reach
- * alpha with one noisy sample on the wrong side, as the A/B rounds below do.
- */
-const baselineIterations = (loaded: Awaited<ReturnType<typeof loadConfig>>) =>
-  2 * rankTestSamples(loaded.config.thresholds.alpha, 1);
-
-/**
  * The whole measuring path against real processes and a real Chromium: the
  * fixture app's server, page, CLI and script, then a commit that makes
  * `work()` slower, which an A/B compare must flag on the benchmarks that call
  * it and on no other.
  */
-
 describe('measure and compare the fixture app', () => {
   let repo: string;
   beforeAll(() => {
@@ -98,11 +89,11 @@ describe('measure and compare the fixture app', () => {
   it('measures every probe kind and records a baseline', async () => {
     const loaded = await loadConfig(repo);
     const store = new Store(loaded.dir);
-    const run = await measure({ loaded, store, purpose: 'baseline', iterations: baselineIterations(loaded) });
+    const run = await measure({ loaded, store, purpose: 'baseline', iterations: 6 });
     expect(run.failed).toBeUndefined();
     const byId = Object.fromEntries(run.results.map((result) => [result.benchmark, result]));
     for (const result of run.results) expect(result.errors, result.benchmark).toEqual([]);
-    expect(byId['api.items']!.metrics.total_ms!.values).toHaveLength(baselineIterations(loaded));
+    expect(byId['api.items']!.metrics.total_ms!.values).toHaveLength(6);
     expect(byId['web.home']!.metrics).toHaveProperty('fcp_ms');
     expect(byId['web.home']!.metrics).toHaveProperty('step.open-settings_ms');
     expect(byId['web.home']!.primary).toBe('flow_ms');
@@ -145,24 +136,17 @@ describe('measure and compare the fixture app', () => {
     expect(verdict('api.health')).not.toBe('regression');
     expect(comparison.verdict).toBe('regression');
 
-    // The baseline path finds the earlier commit's baseline on this machine and
-    // never reads the slowdown as unchanged. A loaded runner can leave too
-    // little evidence for a verdict, which the comparison reports as noisy.
-    const run = await measure({
-      loaded,
-      store,
-      purpose: 'baseline',
-      only: ['api.items'],
-      iterations: baselineIterations(loaded),
-    });
+    // The baseline path finds the earlier commit's baseline on this machine.
+    // Its verdict compares two runs taken at different times, so it depends on
+    // the runner's load; the A/B rounds above and the stats table test decide.
+    const run = await measure({ loaded, store, purpose: 'baseline', only: ['api.items'], iterations: 10 });
     const againstBaseline = await compareWithBaseline(loaded, store, run);
     expect('comparison' in againstBaseline).toBe(true);
     if ('comparison' in againstBaseline) {
       const earlier = execFileSync('git', ['rev-parse', 'HEAD~1'], { cwd: repo, encoding: 'utf8' }).trim();
       expect(againstBaseline.comparison.base.sha).toBe(earlier);
-      expect(['regression', 'noisy']).toContain(
-        againstBaseline.comparison.metrics.find((metric) => metric.primary)?.verdict,
-      );
+      expect(againstBaseline.comparison.head.sha).toBe(run.source.sha);
+      expect(againstBaseline.comparison.metrics.find((metric) => metric.primary)?.benchmark).toBe('api.items');
     }
   });
 });

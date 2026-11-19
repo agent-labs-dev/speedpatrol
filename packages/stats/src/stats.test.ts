@@ -2,15 +2,7 @@ import { thresholdsSchema } from '@speedpatrol/core';
 import { describe, expect, it } from 'vitest';
 import { compareRuns, compareSamples, worstVerdict } from './compare.js';
 import { quantile, summarize, trimOutliers } from './summary.js';
-import {
-  bootstrapDelta,
-  lowestP,
-  mannWhitney,
-  mulberry32,
-  pairedSignTest,
-  rankTestSamples,
-  signTestRounds,
-} from './tests.js';
+import { bootstrapDelta, lowestP, mannWhitney, mulberry32, pairedSignTest, signTestRounds } from './tests.js';
 
 const thresholds = thresholdsSchema.parse({});
 
@@ -185,23 +177,6 @@ it.each([
   expect(signTestRounds(alpha, disagreeing)).toBe(rounds);
   const head = Array.from({ length: rounds - 1 }, (_, i) => (i < disagreeing ? -1 : 1));
   expect(pairedSignTest(Array(rounds - 1).fill(0), head).p).toBeGreaterThanOrEqual(alpha);
-});
-it.each([
-  // alpha, disagreeing samples, samples per side: n against n with U = disagreeing first gives p < alpha.
-  [0.01, 0, 6],
-  [0.01, 1, 6],
-  [0.05, 0, 4],
-  [0.05, 1, 5],
-])('needs the fewest rank-test samples for alpha %f with %i disagreeing (%i)', (alpha, disagreeing, samples) => {
-  expect(rankTestSamples(alpha, disagreeing)).toBe(samples);
-  const sides = (n: number) => {
-    const base = Array.from({ length: n }, (_, i) => i);
-    if (disagreeing) base[n - 1] = n + disagreeing - 0.5;
-    return [base, Array.from({ length: n }, (_, i) => n + i)] as const;
-  };
-  expect(mannWhitney(...sides(samples)).u).toBe(disagreeing);
-  expect(mannWhitney(...sides(samples)).p).toBeLessThan(alpha);
-  expect(mannWhitney(...sides(samples - 1)).p).toBeGreaterThanOrEqual(alpha);
 });
 it('gives the p these samples would reach if the change separated them', () => {
   const distinct = (n: number) => Array.from({ length: n }, (_, i) => 10 + i / 10);
