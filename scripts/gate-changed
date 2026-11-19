@@ -1,22 +1,26 @@
 #!/usr/bin/env bash
 # pnpm gate:changed: the gate, scoped to this branch's changes.
 # Packages resolve each other through dist/, so vitest's import graph cannot see a consumer of a changed package:
-# test every changed package and the packages that depend on it, and every package for a change outside packages/.
+# test every changed package and the packages that depend on it, and every package for a change outside packages/
+# (documentation and workflows excepted). A deleted file counts as changed.
 set -euo pipefail
 cd "$(git rev-parse --show-toplevel)"
 
 base=$(git merge-base origin/main HEAD)
-mapfile -d '' files < <(git diff -z --name-only --diff-filter=d "$base"; git ls-files -z --others --exclude-standard)
+changed=()
+while IFS= read -r -d '' f; do changed+=("$f"); done < <(git diff -z --name-only "$base"; git ls-files -z --others --exclude-standard)
+existing=()
+while IFS= read -r -d '' f; do existing+=("$f"); done < <(git diff -z --name-only --diff-filter=d "$base"; git ls-files -z --others --exclude-standard)
 
-if ((${#files[@]})); then
-  pnpm exec biome check --no-errors-on-unmatched --error-on-warnings "${files[@]}"
+if ((${#existing[@]})); then
+  pnpm exec biome check --no-errors-on-unmatched --error-on-warnings "${existing[@]}"
 fi
 pnpm build
 pnpm knip
 
 filters=()
 full=0
-for f in "${files[@]}"; do
+for f in ${changed[@]+"${changed[@]}"}; do
   case $f in
     packages/*/*) pkg=${f#packages/}; filters+=(--filter "...{./packages/${pkg%%/*}}") ;;
     *.md | docs/* | .github/*) ;;
@@ -27,8 +31,9 @@ done
 if ((full)); then
   pnpm test
 elif ((${#filters[@]})); then
-  mapfile -t dirs < <(pnpm --silent "${filters[@]}" exec pwd)
-  pnpm exec vitest run "${dirs[@]}"
+  dirs=()
+  while IFS= read -r d; do dirs+=("$d"); done < <(pnpm --silent "${filters[@]}" exec pwd)
+  pnpm exec vitest run --passWithNoTests "${dirs[@]}"
 else
   echo "gate:changed: no test inputs changed"
 fi
