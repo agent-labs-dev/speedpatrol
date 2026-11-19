@@ -168,6 +168,22 @@ A step's clock starts after its target is found and visible, and the click skips
 
 The command prints `{"metrics": {"render_ms": 12.3, "fps": 58}}` (or the list form `{"metrics": [{"name": "render_ms", "value": 12.3}]}`) as a line of its output; the last such line counts.
 
+### `pty`
+
+```yaml
+- id: tui.first-reply
+  kind: pty
+  run: node dist/cli.js chat
+  before: rm -rf .cache     # each iteration, not timed
+  ready: SP_READY           # optional: the clock starts here and input is typed
+  input: "hello\r"
+  marker: SP_REPLY          # exact text the app writes when the reply is visible
+  cols: 120
+  rows: 40
+```
+
+[Terminal first replies](benchmarks.md#terminal-first-replies) describes the marker contract.
+
 ## Agents
 
 `use` is a preset (`claude`, `codex`, `opencode`), a command (`{ runtime: cli, command: "..." }` with `{prompt}`, `{mcp}`, `{mcpUrl}`, `{workdir}`, `{timeoutSeconds}`), or a model (`{ runtime: model, via: openrouter | openai | anthropic | custom, model: "...", endpoint: "..." }`, keys from `OPENROUTER_API_KEY`, `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `SPEEDPATROL_MODEL_API_KEY`).

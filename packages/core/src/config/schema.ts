@@ -175,6 +175,43 @@ const electronSchema = z.object({
   steps: z.array(flowStepSchema).default([]),
 });
 
+/**
+ * A terminal app run in a pseudo-terminal. The app and the benchmark share an
+ * explicit marker contract: the app writes `marker` when the moment being
+ * measured is on screen, and the clock stops at its first appearance.
+ */
+const ptySchema = z
+  .object({
+    ...common,
+    kind: z.literal('pty'),
+    run: z.string(),
+    cwd: z.string().optional(),
+    env: z.record(z.string(), z.string()).default({}),
+    /** Run before each iteration and not timed. */
+    before: z.string().optional(),
+    /** Optional marker the app writes when it accepts input: the clock starts there. */
+    ready: z.string().min(1).optional(),
+    /** Typed into the terminal when `ready` appears. End it with `\r` to press Enter. */
+    input: z.string().optional(),
+    /** Exact text the app writes when the measured output is visible. */
+    marker: z.string().min(1),
+    cols: z.number().int().positive().default(120),
+    rows: z.number().int().positive().default(40),
+  })
+  .superRefine((benchmark, ctx) => {
+    // Input is typed with echo off, but an app may render what was typed. Checked again after interpolation.
+    if (benchmark.input?.includes(benchmark.marker)) {
+      ctx.addIssue({ code: 'custom', path: ['marker'], message: 'marker must not appear in input' });
+    }
+    // Typing before the app is ready races its start, and its terminal setup (echo off).
+    if (benchmark.input !== undefined && !benchmark.ready) {
+      ctx.addIssue({ code: 'custom', path: ['input'], message: 'input needs ready: it is typed when ready appears' });
+    }
+    if (benchmark.ready === benchmark.marker) {
+      ctx.addIssue({ code: 'custom', path: ['marker'], message: 'marker must differ from ready' });
+    }
+  });
+
 const androidSchema = z.object({
   ...common,
   kind: z.literal('android'),
@@ -234,6 +271,7 @@ export const benchmarkSchema = z.discriminatedUnion('kind', [
   iosSchema,
   maestroSchema,
   customSchema,
+  ptySchema,
 ]);
 export type Benchmark = z.infer<typeof benchmarkSchema>;
 export type BenchmarkInput = z.input<typeof benchmarkSchema>;

@@ -38,6 +38,24 @@ jobs:
       - run: pnpm --filter @speedpatrol/probes exec playwright install --with-deps chromium
       - run: pnpm test
 
+  # The pty probe stops a terminal app's whole session through ps and getsid(2)
+  # on macOS, where there is no /proc, so its process tests run there too.
+  macos:
+    runs-on: macos-15
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+      - run: pnpm vitest run packages/probes/src/exec.test.ts packages/probes/src/pty.test.ts packages/probes/src/pty-cleanup.test.ts
+
   workflows:
     runs-on: ubuntu-24.04
     timeout-minutes: 10

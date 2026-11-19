@@ -2,6 +2,7 @@
 
 - **Benchmark**: one critical path and how to measure it (`kind`, target, iterations). Defined in `speedpatrol.yml` or `benchmarks.json`.
 - **Probe**: the code that measures one benchmark kind.
+- **Marker**: exact text an app writes when a measured moment is on screen; the `ios` and `pty` probes stop their clocks at it.
 - **Sample**: the metrics of one timed iteration.
 - **Primary metric**: the metric that decides a benchmark's verdict.
 - **Run**: every benchmark measured once against one checkout on one machine.

@@ -143,11 +143,18 @@ function stepCommands(config: SpeedpatrolConfig, benchmarks: Benchmark[]): Step[
   }
   for (const benchmark of benchmarks) {
     const usedBy = `benchmark ${benchmark.id}`;
-    if (benchmark.kind === 'command' || benchmark.kind === 'startup' || benchmark.kind === 'custom') {
+    if (
+      benchmark.kind === 'command' ||
+      benchmark.kind === 'startup' ||
+      benchmark.kind === 'custom' ||
+      benchmark.kind === 'pty'
+    ) {
       steps.push({ run: benchmark.run, cwd: benchmark.cwd, env: benchmark.env, usedBy });
       if (benchmark.kind !== 'custom' && benchmark.before) {
         steps.push({ run: benchmark.before, cwd: benchmark.cwd, env: benchmark.env, usedBy });
       }
+      // The pty probe starts `script` with the benchmark's own env and cwd.
+      if (benchmark.kind === 'pty') steps.push({ run: 'script', cwd: benchmark.cwd, env: benchmark.env, usedBy });
       if (benchmark.profile.command) {
         steps.push({ run: benchmark.profile.command, cwd: benchmark.cwd, env: benchmark.env, usedBy });
       }
