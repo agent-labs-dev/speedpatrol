@@ -22,3 +22,7 @@ package a deep module. Read [CONTRIBUTING.md](CONTRIBUTING.md) before changing c
 ## Standards
 
 - `repo-standards`: the RS-* requirements every cjber and agent-labs-dev repo meets; its `audit.py` checks this repo.
+
+## Waivers
+
+- RS-14: a merge to `main` that raises `packages/speedpatrol/package.json` above the newest `v*` tag runs `release.yml`, which publishes to npm by trusted publishing and then pushes the release tag and GitHub release; no workflow runs on a pushed tag.
