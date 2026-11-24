@@ -1,6 +1,6 @@
 {
   "name": "speedpatrol",
-  "version": "0.4.1",
+  "version": "0.5.0",
   "description": "A team of AI agents that measures your app's critical paths on every commit, catches regressions, and proposes speed-ups.",
   "license": "Apache-2.0",
   "type": "module",
