@@ -168,7 +168,14 @@ const issueLabel = (url) => {
   return number ? `#${number}` : 'link';
 };
 
-const VERDICT_GLYPH = { regression: '◆', improvement: '●', noisy: '◐', unchanged: '○', missing: '–' };
+const VERDICT_GLYPH = {
+  regression: '◆',
+  improvement: '●',
+  noisy: '◐',
+  unchanged: '○',
+  not_comparable: '⊘',
+  missing: '–',
+};
 const verdict = (value) =>
   value
     ? `<span class="verdict ${esc(value)}"><i aria-hidden="true">${VERDICT_GLYPH[value] ?? '?'}</i>${esc(value)}</span>`
@@ -1132,7 +1139,7 @@ function renderRuns(data) {
 
 // ---------------------------------------------------------------- comparison detail
 
-const VERDICT_ORDER = ['regression', 'noisy', 'missing', 'improvement', 'unchanged'];
+const VERDICT_ORDER = ['regression', 'noisy', 'not_comparable', 'missing', 'improvement', 'unchanged'];
 
 function renderComparison(data, at) {
   const { comparison } = data;
