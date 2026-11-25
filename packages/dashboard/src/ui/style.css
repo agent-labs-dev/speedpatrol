@@ -391,6 +391,7 @@ td.wrap {
   color: var(--warning);
 }
 .verdict.unchanged i,
+.verdict.not_comparable i,
 .verdict.missing i {
   color: var(--muted);
 }

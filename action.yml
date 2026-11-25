@@ -42,7 +42,7 @@ inputs:
 
 outputs:
   verdict:
-    description: regression, improvement, unchanged, noisy or missing.
+    description: regression, improvement, unchanged, noisy, not_comparable or missing.
     value: ${{ steps.compare.outputs.verdict }}
 
 runs:

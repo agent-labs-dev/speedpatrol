@@ -69,7 +69,14 @@ function comparableSummary(values: readonly number[]) {
   return summarize(trimOutliers(values));
 }
 
-const SEVERITY: Record<Verdict, number> = { regression: 4, noisy: 3, improvement: 2, unchanged: 1, missing: 0 };
+const SEVERITY: Record<Verdict, number> = {
+  regression: 5,
+  noisy: 4,
+  improvement: 3,
+  unchanged: 2,
+  not_comparable: 1,
+  missing: 0,
+};
 
 /** The worst verdict wins: one regression outweighs any number of speed-ups. */
 export function worstVerdict(verdicts: Verdict[]): Verdict {
@@ -110,6 +117,8 @@ export type CompareOptions = {
   headLabel: string;
   /** Only these benchmarks. Default: all that either side measured. */
   benchmarks?: string[];
+  /** Benchmarks whose definition or harness changed between base and head, mapped to the reason. */
+  incomparable?: ReadonlyMap<string, string>;
 };
 
 export function compareRuns(baseRuns: readonly Run[], headRuns: readonly Run[], options: CompareOptions): Comparison {
@@ -131,6 +140,8 @@ export function compareRuns(baseRuns: readonly Run[], headRuns: readonly Run[], 
     const h = head.get(id);
     const reference = h ?? b;
     if (!reference) continue;
+    const incomparableReason = options.incomparable?.get(id);
+    if (incomparableReason) warnings.push(`${id}: not comparable (${incomparableReason}).`);
     const names = new Set([...Object.keys(b?.metrics ?? {}), ...Object.keys(h?.metrics ?? {})]);
     for (const name of names) {
       const bm = b?.metrics[name];
@@ -150,13 +161,22 @@ export function compareRuns(baseRuns: readonly Run[], headRuns: readonly Run[], 
       const dropped = Math.max(br.length, hr.length) - pairs.length;
       if (paired && dropped) warnings.push(`${id}.${name}: omitted ${dropped} incomplete paired rounds.`);
       const untied = pairs.filter(([b, h]) => b !== h).length;
-      if (paired && untied < minimumRounds)
+      if (!incomparableReason && paired && untied < minimumRounds)
         warnings.push(
           `${id}.${name}: ${untied} non-tied rounds of ${pairs.length} complete; the exact sign test needs at least ${minimumRounds} non-tied rounds for p < ${options.thresholds.alpha}. This comparison is exploratory.`,
         );
       const bv = paired ? pairs.map(([value]) => value) : (bm?.values ?? []);
       const hv = paired ? pairs.map(([, value]) => value) : (hm?.values ?? []);
       const result = compareSamples(bv, hv, spec.better, options.thresholds, paired);
+      const verdictResult: MetricVerdict = incomparableReason
+        ? {
+            deltaPct: result.deltaPct,
+            deltaAbs: result.deltaAbs,
+            ci: result.ci,
+            pValue: result.pValue,
+            verdict: 'not_comparable',
+          }
+        : result;
       metrics.push({
         benchmark: id,
         metric: name,
@@ -166,7 +186,7 @@ export function compareRuns(baseRuns: readonly Run[], headRuns: readonly Run[], 
         critical: reference.critical,
         base: bv.length ? (paired ? summarize(bv) : comparableSummary(bv)) : undefined,
         head: hv.length ? (paired ? summarize(hv) : comparableSummary(hv)) : undefined,
-        ...result,
+        ...verdictResult,
       });
     }
   }

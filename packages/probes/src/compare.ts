@@ -15,6 +15,7 @@ import {
 } from '@speedpatrol/core';
 import { compareRuns } from '@speedpatrol/stats';
 import { AppSession } from './app.js';
+import { changedBenchmarks } from './benchmark-changes.js';
 import { type MeasureOptions, measure } from './runner.js';
 
 /** Runs `app.prepare` in a checkout: install, build. Not timed. */
@@ -180,11 +181,13 @@ export async function abCompare(options: AbOptions): Promise<{ comparison: Compa
       (side === base ? baseRuns : headRuns).push(run);
     }
   }
+  const incomparable = await changedBenchmarks(loaded, base.dir, head.dir, options.only, [store.root]);
   const comparison = compareRuns(baseRuns, headRuns, {
     mode: 'ab',
     thresholds: loaded.config.thresholds,
     baseLabel: base.label,
     headLabel: head.label,
+    incomparable,
   });
   await store.saveComparison(comparison);
   return { comparison, runs: [...baseRuns, ...headRuns] };

@@ -37,11 +37,17 @@ export const VERDICT_ICON: Record<Verdict, string> = {
   improvement: '🟢',
   unchanged: '⚪',
   noisy: '🟡',
+  not_comparable: '⊘',
   missing: '⚫',
 };
 
+function verdictLabel(verdict: Verdict): string {
+  return verdict === 'not_comparable' ? 'not comparable' : verdict;
+}
+
 function row(metric: MetricComparison): string {
-  const verdict = metric.underThreshold ? `${metric.verdict} (under threshold)` : metric.verdict;
+  const label = verdictLabel(metric.verdict);
+  const verdict = metric.underThreshold ? `${label} (under threshold)` : label;
   return `| ${VERDICT_ICON[metric.verdict]} ${verdict} | \`${metric.benchmark}\` | ${metric.metric} | ${formatValue(
     metric.base?.median,
     metric.unit,
@@ -56,7 +62,7 @@ export function comparisonMarkdown(comparison: Comparison, options: { all?: bool
     (metric) => options.all || metric.primary || metric.verdict === 'regression' || metric.verdict === 'improvement',
   );
   const lines = [
-    `**${VERDICT_ICON[comparison.verdict]} ${comparison.verdict}**: \`${comparison.head.label}\` (${comparison.head.sha.slice(
+    `**${VERDICT_ICON[comparison.verdict]} ${verdictLabel(comparison.verdict)}**: \`${comparison.head.label}\` (${comparison.head.sha.slice(
       0,
       8,
     )}) against \`${comparison.base.label}\` (${comparison.base.sha.slice(0, 8)})`,

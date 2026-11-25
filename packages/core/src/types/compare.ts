@@ -9,9 +9,11 @@ import type { Better, Summary, Unit } from './metrics.js';
  *   while the samples are steady.
  * - `noisy`: a large change that is not significant, because the samples are
  *   too variable or too few for the test to reach alpha.
+ * - `not_comparable`: the benchmark definition or its harness/script files
+ *   changed between base and head, so whole-run timings are not like for like.
  * - `missing`: one side has no samples.
  */
-export type Verdict = 'regression' | 'improvement' | 'unchanged' | 'noisy' | 'missing';
+export type Verdict = 'regression' | 'improvement' | 'unchanged' | 'noisy' | 'not_comparable' | 'missing';
 
 export type MetricComparison = {
   benchmark: string;
