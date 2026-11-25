@@ -181,7 +181,7 @@ export async function abCompare(options: AbOptions): Promise<{ comparison: Compa
       (side === base ? baseRuns : headRuns).push(run);
     }
   }
-  const incomparable = await changedBenchmarks(loaded, base.dir, head.dir, options.only);
+  const incomparable = await changedBenchmarks(loaded, base.dir, head.dir, options.only, [store.root]);
   const comparison = compareRuns(baseRuns, headRuns, {
     mode: 'ab',
     thresholds: loaded.config.thresholds,

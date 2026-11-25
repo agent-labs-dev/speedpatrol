@@ -162,4 +162,77 @@ describe('changed benchmark detection in abCompare (#73)', () => {
       rmSync(repo, { recursive: true, force: true });
     }
   });
+
+  it('ignores generated store artifacts inside protected config directories', {
+    timeout: 60_000,
+  }, async () => {
+    const root = mkdtempSync(join(tmpdir(), 'speedpatrol-protected-runs-'));
+    const base = join(root, 'base');
+    const head = join(root, 'head');
+    try {
+      for (const dir of [base, head]) {
+        mkdirSync(join(dir, '.speedpatrol'), { recursive: true });
+        writeFileSync(
+          join(dir, '.speedpatrol/speedpatrol.yml'),
+          JSON.stringify({
+            benchmarks: [
+              {
+                id: 'noop',
+                kind: 'command',
+                run: 'node -e ""',
+                protectedPaths: ['.speedpatrol'],
+              },
+            ],
+          }),
+        );
+      }
+      const loaded = await loadConfig(head);
+      const { comparison } = await abCompare({
+        loaded,
+        store: new Store(loaded.dir),
+        base: { label: 'base', dir: base },
+        head: { label: 'head', dir: head },
+        iterations: 1,
+        rounds: 1,
+        profile: false,
+      });
+      expect(comparison.metrics.find((metric) => metric.primary)?.verdict).not.toBe('not_comparable');
+      expect(comparison.warnings.some((warning) => warning.includes('benchmark file changed'))).toBe(false);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it.each(['command', 'custom'] as const)('detects an edited %s harness after a shell cd', async (kind) => {
+    const root = mkdtempSync(join(tmpdir(), 'speedpatrol-cd-harness-'));
+    const base = join(root, 'base');
+    const head = join(root, 'head');
+    try {
+      for (const dir of [base, head]) {
+        mkdirSync(join(dir, '.speedpatrol'), { recursive: true });
+        mkdirSync(join(dir, 'tests'), { recursive: true });
+        writeFileSync(
+          join(dir, '.speedpatrol/speedpatrol.yml'),
+          JSON.stringify({
+            benchmarks: [
+              {
+                id: 'scenarios',
+                kind,
+                run: 'cd tests && node bench.mjs',
+                ...(kind === 'custom' ? { metrics: { total_ms: { unit: 'ms', better: 'lower' } } } : {}),
+              },
+            ],
+          }),
+        );
+        writeFileSync(
+          join(dir, 'tests/bench.mjs'),
+          `console.log(JSON.stringify({metrics: {total_ms: ${dir === base ? 10 : 100}}}));\n`,
+        );
+      }
+      const reasons = await changedBenchmarks(await loadConfig(head), base, head);
+      expect(reasons.get('scenarios')).toEqual(expect.stringContaining('tests/bench.mjs'));
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
 });
