@@ -26,15 +26,57 @@ const SYSTEM = `You are the optimizer of Speedpatrol, a team of agents that keep
 You work in your own git worktree (the current directory), on a branch made for you. Your job: make one benchmark faster without making anything else slower, with a change a reviewer would merge.
 
 How to work:
-1. get_target shows the primary metric, latest numbers, CPU hotspots and remaining working time. Trace what the primary metric actually times, including its wait conditions; a CPU hotspot alone is not evidence that removing it can clear the improvement threshold.
-2. Call set_hypothesis with one hypothesis (e.g. "loadOrders queries once per row; batch it") and why it can materially improve the primary metric. Prefer algorithmic and I/O fixes (N+1 queries, repeated work, oversized payloads, blocking calls, needless re-renders) over micro-tuning or speculative import rewrites.
-3. Edit the code. Keep behaviour identical, keep the change small, and follow the repo's required checks. Measure a plausible candidate before optional broad validation; run the required checks before finishing a candidate for publication. Do not fix unrelated lint or test failures.
-4. Call measure_change to A/B your worktree against the base. It prepares both sides and measures one round without profiling. Wait without editing files or running builds, tests or other CPU-heavy work during measurement.
+1. get_target shows the primary metric, latest numbers, CPU hotspots, remaining working time, and the exact enforced policy (allowed paths, required checks, and protected paths). Read the enforced policy before choosing a hypothesis: only tracked files listed in allowed paths may be changed, and no untracked files may remain. Trace what the primary metric actually times, including its wait conditions; a CPU hotspot alone is not evidence that removing it can clear the improvement threshold.
+2. Call set_hypothesis with one hypothesis (e.g. "loadOrders queries once per row; batch it") and why it can materially improve the primary metric. If the real hotspot cannot be fixed within the allowed paths, do not edit disallowed files; leave the worktree clean and call finish explaining which paths would need a policy change. Prefer algorithmic and I/O fixes (N+1 queries, repeated work, oversized payloads, blocking calls, needless re-renders) over micro-tuning or speculative import rewrites.
+3. Edit only files listed in allowed paths. Keep behaviour identical, keep the change small, and run the exact required checks listed in the enforced policy before finishing a candidate for publication. Call check_policy to verify path compliance before costly validation or measurement. Do not fix unrelated lint or test failures.
+4. Call measure_change to A/B your worktree against the base. It checks the path policy first, then prepares both sides and measures one round without profiling. Wait without editing files or running builds, tests or other CPU-heavy work during measurement.
 5. When the primary metric improves without collateral regressions and the required checks pass, call finish promptly: Speedpatrol runs a separate full A/B verification after the session, outside your working-time limit. Do not spend the remaining budget remeasuring an unchanged candidate. For an unchanged or regressed result, revert it before trying a different hypothesis, and only start another A/B if the remaining time covers the last A/B duration plus edits, required checks and finish. Otherwise revert unsuccessful edits and call finish explaining that no candidate worked.
 
 Call finish with a title and what changed. The title says what the code change does, for a reviewer who does not know the benchmark. Do not commit, push or open a PR: Speedpatrol verifies and publishes.
 
 The measurement and the declared checks and path policy decide whether the change is kept: an improvement smaller than the threshold, any regression elsewhere, failed checks, or undeclared changes discards it.`;
+
+function policyDescription(
+  allowedPaths: readonly string[],
+  checks: readonly string[],
+  protectedPaths: ReadonlySet<string>,
+): string {
+  const list = (items: readonly string[]) => (items.length ? items.map((item) => `- ${item}`).join('\n') : '- (none)');
+  return [
+    '## Enforced policy',
+    'Only the exact tracked files listed under Allowed paths may be modified, and no untracked files may remain. If the hotspot lies outside Allowed paths, do not edit disallowed files: leave the worktree clean and call finish explaining which files would need a policy change.',
+    '',
+    '### Allowed paths',
+    list(allowedPaths),
+    '',
+    '### Required checks',
+    list(checks),
+    '',
+    '### Protected paths (never edit)',
+    list([...protectedPaths].sort()),
+  ].join('\n');
+}
+
+async function worktreePolicyViolation(worktree: string, allowedPaths: readonly string[]): Promise<string | undefined> {
+  const status = await git(worktree, ['status', '--porcelain', '--untracked-files=all']);
+  const untracked = status
+    .split('\n')
+    .filter((line) => line.startsWith('?? '))
+    .map((line) => line.slice(3));
+  if (untracked.length > 0) {
+    return `Untracked scratch files in experiment: ${untracked.join(', ')}`;
+  }
+  const [workingDiff, stagedDiff] = await Promise.all([
+    git(worktree, ['diff', '--no-renames', '--name-only', 'HEAD']),
+    git(worktree, ['diff', '--no-renames', '--cached', '--name-only', 'HEAD']),
+  ]);
+  const changedTracked = new Set([...workingDiff.split('\n'), ...stagedDiff.split('\n')].filter(Boolean));
+  const invalidPaths = [...changedTracked].filter((path) => !allowedPaths.includes(path));
+  if (invalidPaths.length > 0) {
+    return `Changed paths are outside allowedPaths: ${invalidPaths.join(', ')}`;
+  }
+  return undefined;
+}
 
 function targetDescription(benchmark: Benchmark, run: Run | undefined): string {
   const result = run?.results.find((item) => item.benchmark === benchmark.id);
@@ -164,23 +206,56 @@ export async function runOptimizer(options: {
     const deadline = Date.now() + config.timeoutMinutes * 60_000;
     const remaining = () =>
       `Working time remaining: ${Math.max(0, (deadline - Date.now()) / 60_000).toFixed(1)} minutes.`;
+    const policy = policyDescription(config.allowedPaths, config.checks, protectedPaths);
     const target = () =>
-      `${targetDescription(benchmark, options.baseRun)}\n\n## Working budget\n${remaining()}\nSession limit: ${config.timeoutMinutes} minutes. Final A/B verification runs after finish.\n\n## Improvement requirements\n${JSON.stringify(loaded.config.thresholds)}\nOptimizer minimum improvement: ${(config.minImprovement * 100).toFixed(1)}%. The primary metric must also receive an improvement verdict.`;
+      `${policy}\n\n## Working budget\n${remaining()}\nSession limit: ${config.timeoutMinutes} minutes. Final A/B verification runs after finish.\n\n## Improvement requirements\n${JSON.stringify(loaded.config.thresholds)}\nOptimizer minimum improvement: ${(config.minImprovement * 100).toFixed(1)}%. The primary metric must also receive an improvement verdict.\n\n${targetDescription(benchmark, options.baseRun)}`;
     let hypothesis: string | undefined;
     const tools = [
       tool(
         'get_target',
-        'The benchmark, primary metric, latest numbers, CPU hotspots, improvement requirements and remaining working time.',
+        'The benchmark, primary metric, latest numbers, CPU hotspots, enforced policy (allowed paths, required checks, protected paths), improvement requirements and remaining working time.',
         {},
         [],
         async () => ({ text: target() }),
       ),
       tool(
-        'measure_change',
-        'A/B measure your worktree against the base commit, for the target and the critical benchmarks. Returns duration and remaining working time. Keep the machine idle while it runs.',
+        'check_policy',
+        'Read-only check of your current worktree edits against the enforced allowedPaths and untracked-file policy before running checks or measurement.',
         {},
         [],
         async () => {
+          const violation = await worktreePolicyViolation(worktree, config.allowedPaths);
+          if (violation) {
+            return {
+              text: `Policy violation: ${violation}\nAllowed paths: ${config.allowedPaths.join(', ')}`,
+              summary: 'Policy violation detected.',
+            };
+          }
+          const changed = (await git(worktree, ['diff', '--no-renames', '--name-only', 'HEAD']))
+            .split('\n')
+            .filter(Boolean);
+          return {
+            text:
+              changed.length > 0
+                ? `Policy OK. Changed allowed paths: ${changed.join(', ')}`
+                : `Policy OK (no changes yet). Allowed paths: ${config.allowedPaths.join(', ')}`,
+            summary: 'Policy OK.',
+          };
+        },
+      ),
+      tool(
+        'measure_change',
+        'A/B measure your worktree against the base commit, for the target and the critical benchmarks. Checks path policy first and returns duration and remaining working time. Keep the machine idle while it runs.',
+        {},
+        [],
+        async () => {
+          const violation = await worktreePolicyViolation(worktree, config.allowedPaths);
+          if (violation) {
+            return {
+              text: `Refused to measure: ${violation}\nAllowed paths: ${config.allowedPaths.join(', ')}\nRevert disallowed changes or remove untracked files before measuring.`,
+              summary: 'Blocked by path policy.',
+            };
+          }
           const started = Date.now();
           const { comparison } = await abCompare({
             loaded,
@@ -255,21 +330,9 @@ export async function runOptimizer(options: {
       await save({ status: 'rejected', reason: 'The optimizer made no change.' });
       return { experiment };
     }
-    const status = await git(worktree, ['status', '--porcelain', '--untracked-files=all']);
-    const untracked = status
-      .split('\n')
-      .filter((line) => line.startsWith('?? '))
-      .map((line) => line.slice(3));
-    if (untracked.length > 0) {
-      await save({ status: 'rejected', reason: `Untracked scratch files in experiment: ${untracked.join(', ')}` });
-      return { experiment };
-    }
-    const changedTracked = new Set(
-      (await git(worktree, ['diff', '--no-renames', '--name-only', 'HEAD'])).split('\n').filter(Boolean),
-    );
-    const invalidPaths = [...changedTracked].filter((path) => !config.allowedPaths.includes(path));
-    if (invalidPaths.length > 0) {
-      await save({ status: 'rejected', reason: `Changed paths are outside allowedPaths: ${invalidPaths.join(', ')}` });
+    const violation = await worktreePolicyViolation(worktree, config.allowedPaths);
+    if (violation) {
+      await save({ status: 'rejected', reason: violation });
       return { experiment };
     }
     const candidateDiff = await git(worktree, ['diff', '--binary', 'HEAD']);
